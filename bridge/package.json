@@ -1,0 +1,28 @@
+{
+  "name": "x32-bridge",
+  "version": "1.0.0",
+  "description": "Bridge local para enviar OSC/UDP para Behringer X32",
+  "main": "dist/bridge.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/bridge.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/bridge.js"
+  },
+  "keywords": [
+    "x32",
+    "osc",
+    "udp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.8",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.3"
+  }
+}
