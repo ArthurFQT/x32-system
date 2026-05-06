@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: x32-server
+    runtime: node
+    rootDir: server
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: ACCESS_BASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: BRIDGE_SECRET
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: USE_REAL_X32_IO
+        value: "true"
+      - key: BRIDGE_IO_REQUEST_TIMEOUT_MS
+        value: "10000"
+      - key: TOKEN_RETENTION_MINUTES
+        value: "1440"
+      - key: CLEANUP_INTERVAL_MS
+        value: "10000"

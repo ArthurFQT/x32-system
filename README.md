@@ -178,3 +178,115 @@ Na bridge, isso e convertido para `/on` da X32:
 - `mute=0` => `/on = 1`
 
 Assim a semantica fica consistente para o musico e para o OSC da X32.
+
+## Publicacao no GitHub
+
+Este repositorio agora esta preparado para subir sem arquivos sensiveis e sem artefatos locais.
+
+O que fica fora do git:
+
+- `**/node_modules`
+- `**/dist`
+- `**/.env`
+
+Checklist antes do push:
+
+1. Confira se nao ha segredo versionado:
+
+```bash
+git ls-files "*.env"
+```
+
+O comando acima deve retornar vazio.
+
+2. Confira o estado da arvore:
+
+```bash
+git status
+```
+
+3. Commit e push:
+
+```bash
+git add .
+git commit -m "chore: prepare repository for github and deploy"
+git branch -M main
+git remote add origin https://github.com/SEU_USUARIO/SEU_REPO.git
+git push -u origin main
+```
+
+Se algum segredo antigo ja foi commitado, troque imediatamente esses valores:
+
+- `BRIDGE_SECRET`
+- `ADMIN_API_KEY`
+
+## Deploy recomendado (Vercel + Render + Bridge local)
+
+Arquitetura de deploy:
+
+- `web` na Vercel (site SPA)
+- `server` no Render (processo Node persistente para Socket.io)
+- `bridge` local, na mesma rede da X32
+
+### 1) Deploy do backend (`server`) no Render
+
+O repo ja inclui `render.yaml` na raiz com:
+
+- `rootDir: server`
+- `buildCommand: npm ci && npm run build`
+- `startCommand: npm start`
+- `healthCheckPath: /health`
+
+Passos:
+
+1. No Render, crie via Blueprint usando o `render.yaml`.
+2. Preencha as env vars marcadas como `sync: false`:
+   - `ACCESS_BASE_URL` (URL publica do frontend)
+   - `CORS_ORIGIN` (mesma URL do frontend)
+   - `BRIDGE_SECRET`
+   - `ADMIN_API_KEY`
+3. Aguarde o deploy e teste:
+
+```bash
+curl https://SEU_BACKEND_RENDER/health
+```
+
+### 2) Deploy do frontend (`web`) na Vercel
+
+O repo ja inclui `web/vercel.json` para rewrite SPA (`/mix` e `/admin` funcionarem por URL direta).
+
+Passos:
+
+1. Importe o repositorio na Vercel.
+2. Defina `Root Directory = web`.
+3. Configure env:
+   - `VITE_SERVER_URL=https://SEU_BACKEND_RENDER`
+4. Deploy.
+
+Teste:
+
+- `https://SEU_FRONTEND/admin`
+- `https://SEU_FRONTEND/mix?token=...`
+
+### 3) Bridge local (`bridge`)
+
+No computador local (rede da mesa):
+
+1. Configure `bridge/.env`:
+   - `BACKEND_URL=https://SEU_BACKEND_RENDER`
+   - `BRIDGE_SECRET` igual ao backend
+   - `X32_IP` da mesa
+   - `X32_PORT=10023`
+2. Rode:
+
+```bash
+npm ci
+npm run build
+npm start
+```
+
+### 4) Validacao final
+
+1. Abra `/admin`, gere token e QR.
+2. Teste no celular via 4G/5G (fora da rede local).
+3. Confirme logs da bridge enviando OSC.
