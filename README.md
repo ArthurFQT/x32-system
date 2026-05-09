@@ -20,6 +20,30 @@ Fluxo:
   - bridge e backend
   - bridge e X32 (UDP porta 10023)
 
+## Modo rede local
+
+Para usar pelo celular/tablet na mesma rede, use o IP do computador que roda o
+backend e o frontend. No Windows:
+
+```powershell
+Get-NetIPAddress -AddressFamily IPv4
+```
+
+Exemplo com `192.168.0.13`:
+
+- `server/.env`: `HOST=0.0.0.0`, `ACCESS_BASE_URL=http://192.168.0.13:5173`
+- `server/.env`: `CORS_ORIGIN=http://localhost:5173,http://127.0.0.1:5173,http://192.168.0.13:5173`
+- `web/.env`: `VITE_SERVER_URL=http://192.168.0.13:3000`
+- `bridge/.env`: `BACKEND_URL=http://192.168.0.13:3000`
+
+Depois rode `server`, `web` e `bridge` normalmente. Abra no outro dispositivo:
+
+```text
+http://192.168.0.13:5173/admin
+```
+
+Se o IP da maquina mudar, atualize esses tres `.env`.
+
 ## 1) Backend (`server/`)
 
 ### Variaveis de ambiente

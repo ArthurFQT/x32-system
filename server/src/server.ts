@@ -34,10 +34,8 @@ import {
 dotenv.config();
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
-const ACCESS_BASE_URL = (process.env.ACCESS_BASE_URL ?? "http://localhost:5173").replace(
-  /\/$/,
-  "",
-);
+const HOST = process.env.HOST ?? "0.0.0.0";
+const CONFIGURED_ACCESS_BASE_URL = (process.env.ACCESS_BASE_URL ?? "").replace(/\/$/, "");
 const BRIDGE_SECRET = process.env.BRIDGE_SECRET ?? "";
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY ?? "";
 const USE_REAL_X32_IO = (process.env.USE_REAL_X32_IO ?? "false").toLowerCase() === "true";
@@ -100,19 +98,62 @@ type BridgeIoOptionsResponse =
       error: string;
     };
 
-function buildAccessUrl(tokenId: string): string {
-  return `${ACCESS_BASE_URL}/mix?token=${encodeURIComponent(tokenId)}`;
+function isLocalAccessBaseUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
-async function buildQrCodeDataUrl(tokenId: string): Promise<string> {
-  const accessUrl = buildAccessUrl(tokenId);
+function getRequestOrigin(req: Request): string | undefined {
+  const origin = req.header("origin")?.replace(/\/$/, "");
+  if (origin) {
+    return origin;
+  }
+
+  const referer = req.header("referer");
+  if (!referer) {
+    return undefined;
+  }
+
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveAccessBaseUrl(req?: Request): string {
+  const requestOrigin = req ? getRequestOrigin(req) : undefined;
+
+  if (
+    requestOrigin &&
+    (!CONFIGURED_ACCESS_BASE_URL || isLocalAccessBaseUrl(CONFIGURED_ACCESS_BASE_URL))
+  ) {
+    return requestOrigin;
+  }
+
+  return CONFIGURED_ACCESS_BASE_URL || "http://localhost:5173";
+}
+
+function buildAccessUrl(tokenId: string, accessBaseUrl = resolveAccessBaseUrl()): string {
+  return `${accessBaseUrl}/mix?token=${encodeURIComponent(tokenId)}`;
+}
+
+async function buildQrCodeDataUrl(
+  tokenId: string,
+  accessBaseUrl = resolveAccessBaseUrl(),
+): Promise<string> {
+  const accessUrl = buildAccessUrl(tokenId, accessBaseUrl);
   return QRCode.toDataURL(accessUrl, {
     margin: 1,
     width: 320,
   });
 }
 
-function toPublicToken(token: TokenRecord) {
+function toPublicToken(token: TokenRecord, accessBaseUrl = resolveAccessBaseUrl()) {
   const status = getTokenStatus(token);
   const controlsByBus = token.bus.reduce<Record<number, ChannelControl[]>>((acc, bus) => {
     const busControls = token.controlsByBus[bus] ?? {};
@@ -133,7 +174,7 @@ function toPublicToken(token: TokenRecord) {
     createdAt: token.createdAt,
     revokedAt: token.revokedAt ?? null,
     status,
-    accessUrl: buildAccessUrl(token.id),
+    accessUrl: buildAccessUrl(token.id, accessBaseUrl),
     controlsByBus,
   };
 }
@@ -525,6 +566,7 @@ app.get("/admin/logs", requireAdmin, (req, res) => {
 
 app.post("/generate", requireAdmin, async (req, res) => {
   try {
+    const accessBaseUrl = resolveAccessBaseUrl(req);
     const input = parseGeneratePayload(req.body);
     const tokenId = uuidv4();
     const createdAt = Date.now();
@@ -539,8 +581,8 @@ app.post("/generate", requireAdmin, async (req, res) => {
       expiresAt,
     });
 
-    const accessUrl = buildAccessUrl(token.id);
-    const qrCodeDataUrl = await buildQrCodeDataUrl(token.id);
+    const accessUrl = buildAccessUrl(token.id, accessBaseUrl);
+    const qrCodeDataUrl = await buildQrCodeDataUrl(token.id, accessBaseUrl);
 
     logAction("TOKEN_GENERATED", {
       token: token.id,
@@ -554,7 +596,7 @@ app.post("/generate", requireAdmin, async (req, res) => {
       token: token.id,
       accessUrl,
       qrCodeDataUrl,
-      tokenData: toPublicToken(token),
+      tokenData: toPublicToken(token, accessBaseUrl),
     });
   } catch (error) {
     res.status(400).json({
@@ -565,6 +607,7 @@ app.post("/generate", requireAdmin, async (req, res) => {
 
 app.post("/revoke", requireAdmin, (req, res) => {
   try {
+    const accessBaseUrl = resolveAccessBaseUrl(req);
     const { token: tokenId } = parseRevokePayload(req.body);
     const token = getToken(tokenId);
 
@@ -576,7 +619,7 @@ app.post("/revoke", requireAdmin, (req, res) => {
     const result = revokeToken(token, "api_revoke");
     res.status(200).json({
       message: result.message,
-      tokenData: toPublicToken(token),
+      tokenData: toPublicToken(token, accessBaseUrl),
     });
   } catch (error) {
     res.status(400).json({
@@ -585,27 +628,30 @@ app.post("/revoke", requireAdmin, (req, res) => {
   }
 });
 
-app.get("/tokens", requireAdmin, (_req, res) => {
-  const tokens = listTokens().map(toPublicToken);
+app.get("/tokens", requireAdmin, (req, res) => {
+  const accessBaseUrl = resolveAccessBaseUrl(req);
+  const tokens = listTokens().map((token) => toPublicToken(token, accessBaseUrl));
   res.json({ tokens });
 });
 
 app.get("/token/:tokenId/qrcode", requireAdmin, async (req, res) => {
+  const accessBaseUrl = resolveAccessBaseUrl(req);
   const token = getToken(req.params.tokenId);
   if (!token) {
     res.status(404).json({ error: "Token nao encontrado." });
     return;
   }
 
-  const qrCodeDataUrl = await buildQrCodeDataUrl(token.id);
+  const qrCodeDataUrl = await buildQrCodeDataUrl(token.id, accessBaseUrl);
   res.json({
     token: token.id,
-    accessUrl: buildAccessUrl(token.id),
+    accessUrl: buildAccessUrl(token.id, accessBaseUrl),
     qrCodeDataUrl,
   });
 });
 
 app.post("/token/:tokenId/revoke", requireAdmin, (req, res) => {
+  const accessBaseUrl = resolveAccessBaseUrl(req);
   const token = getToken(req.params.tokenId);
   if (!token) {
     res.status(404).json({ error: "Token nao encontrado." });
@@ -615,11 +661,12 @@ app.post("/token/:tokenId/revoke", requireAdmin, (req, res) => {
   const result = revokeToken(token, "admin_panel");
   res.json({
     message: result.message,
-    tokenData: toPublicToken(token),
+    tokenData: toPublicToken(token, accessBaseUrl),
   });
 });
 
 app.post("/token/:tokenId/enable", requireAdmin, (req, res) => {
+  const accessBaseUrl = resolveAccessBaseUrl(req);
   const token = getToken(req.params.tokenId);
   if (!token) {
     res.status(404).json({ error: "Token nao encontrado." });
@@ -640,12 +687,13 @@ app.post("/token/:tokenId/enable", requireAdmin, (req, res) => {
 
   res.json({
     message: "Token habilitado.",
-    tokenData: toPublicToken(token),
+    tokenData: toPublicToken(token, accessBaseUrl),
   });
 });
 
 app.post("/token/:tokenId/extend", requireAdmin, (req, res) => {
   try {
+    const accessBaseUrl = resolveAccessBaseUrl(req);
     const token = getToken(req.params.tokenId);
     if (!token) {
       res.status(404).json({ error: "Token nao encontrado." });
@@ -668,7 +716,7 @@ app.post("/token/:tokenId/extend", requireAdmin, (req, res) => {
 
     res.json({
       message: "Token estendido com sucesso.",
-      tokenData: toPublicToken(token),
+      tokenData: toPublicToken(token, accessBaseUrl),
     });
   } catch (error) {
     res.status(400).json({
@@ -679,6 +727,7 @@ app.post("/token/:tokenId/extend", requireAdmin, (req, res) => {
 
 app.patch("/token/:tokenId", requireAdmin, (req, res) => {
   try {
+    const accessBaseUrl = resolveAccessBaseUrl(req);
     const token = getToken(req.params.tokenId);
     if (!token) {
       res.status(404).json({ error: "Token nao encontrado." });
@@ -696,7 +745,7 @@ app.patch("/token/:tokenId", requireAdmin, (req, res) => {
 
     res.json({
       message: "Token atualizado.",
-      tokenData: toPublicToken(token),
+      tokenData: toPublicToken(token, accessBaseUrl),
     });
   } catch (error) {
     res.status(400).json({
@@ -860,6 +909,6 @@ setInterval(() => {
   }
 }, CLEANUP_INTERVAL_MS).unref();
 
-server.listen(PORT, () => {
-  console.log(`X32 server listening on port ${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`X32 server listening on ${HOST}:${PORT}`);
 });

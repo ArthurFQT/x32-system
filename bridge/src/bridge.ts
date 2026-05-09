@@ -13,8 +13,13 @@ const X32_PORT = parseInt(process.env.X32_PORT ?? "10023", 10);
 const USE_REAL_X32_IO = (process.env.USE_REAL_X32_IO ?? "false").toLowerCase() === "true";
 const X32_QUERY_TIMEOUT_MS = parseInt(process.env.X32_QUERY_TIMEOUT_MS ?? "160", 10);
 const IO_OPTIONS_CACHE_MS = parseInt(process.env.IO_OPTIONS_CACHE_MS ?? "60000", 10);
+const BACKEND_HEALTHCHECK_TIMEOUT_MS = parseInt(
+  process.env.BACKEND_HEALTHCHECK_TIMEOUT_MS ?? "5000",
+  10,
+);
 
 type ControlType = "volume" | "pan" | "mute";
+type SocketTransport = "polling" | "websocket";
 type X32Event = {
   token: string;
   user: string;
@@ -50,6 +55,19 @@ type BridgeIoOptionsResponse =
 
 const udpClient = dgram.createSocket("udp4");
 let ioOptionsCache: BridgeIoOptions | null = null;
+
+function parseSocketTransports(raw: string | undefined): SocketTransport[] | undefined {
+  if (!raw?.trim()) {
+    return undefined;
+  }
+
+  const transports = raw
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter((item): item is SocketTransport => item === "polling" || item === "websocket");
+
+  return transports.length > 0 ? transports : undefined;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -245,71 +263,187 @@ async function getIoOptions(forceRefresh: boolean): Promise<BridgeIoOptions> {
   }
 }
 
-const socket = io(BACKEND_URL, {
-  transports: ["websocket"],
-  auth: {
-    role: "bridge",
-    bridgeSecret: BRIDGE_SECRET,
-    bridgeName: BRIDGE_NAME,
-  },
-});
+function buildBackendHealthUrl(): string {
+  try {
+    return new URL("/health", BACKEND_URL).toString();
+  } catch {
+    return `${BACKEND_URL.replace(/\/$/, "")}/health`;
+  }
+}
 
-socket.on("connect", () => {
-  console.log(`[BRIDGE] conectado ao backend (${BACKEND_URL})`);
-});
-
-socket.on("disconnect", (reason) => {
-  console.log(`[BRIDGE] desconectado: ${reason}`);
-});
-
-socket.on("connect_error", (error) => {
-  console.error(`[BRIDGE] erro de conexao: ${error.message}`);
-});
-
-socket.on("bridge:get-io-options", async (payload: { forceRefresh?: boolean }, callback?: (response: BridgeIoOptionsResponse) => void) => {
-  if (typeof callback !== "function") {
-    return;
+function describeErrorDetail(value: unknown): string | undefined {
+  if (!value) {
+    return undefined;
   }
 
-  try {
-    const options = await getIoOptions(Boolean(payload?.forceRefresh));
-    callback({
-      ok: true,
-      options,
-    });
-  } catch (error) {
-    callback({
-      ok: false,
-      error: error instanceof Error ? error.message : "BRIDGE_IO_OPTIONS_FAILED",
-    });
+  if (typeof value === "string") {
+    return value;
   }
-});
 
-socket.on("x32", (event: X32Event) => {
-  try {
-    const command = toX32Osc(event);
-    const message = encodeOscMessage(command.path, [
-      { type: command.argType, value: command.value },
-    ]);
+  if (value instanceof Error) {
+    return value.message;
+  }
 
-    udpClient.send(message, X32_PORT, X32_IP, (error) => {
-      if (error) {
-        console.error(
-          `[BRIDGE][UDP_ERROR] token=${event.token} user=${event.user} path=${command.path} error=${error.message}`,
-        );
-        return;
+  if (typeof value !== "object") {
+    return String(value);
+  }
+
+  const detail = value as Record<string, unknown>;
+  const fields = ["code", "status", "statusText", "type", "message"];
+  const parts = fields
+    .map((field) => {
+      const fieldValue = detail[field];
+      if (fieldValue === undefined || fieldValue === null || fieldValue === "") {
+        return undefined;
       }
+      return `${field}=${String(fieldValue)}`;
+    })
+    .filter((item): item is string => Boolean(item));
 
-      console.log(
-        `[BRIDGE][SENT] token=${event.token} user=${event.user} path=${command.path} value=${command.value}`,
-      );
-    });
-  } catch (error) {
-    console.error(
-      `[BRIDGE][OSC_ERROR] token=${event.token} user=${event.user} error=${error instanceof Error ? error.message : "unknown"}`,
-    );
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function describeConnectError(error: Error): string {
+  const detail = error as Error & {
+    cause?: unknown;
+    context?: unknown;
+    description?: unknown;
+    type?: unknown;
+  };
+
+  const parts = [error.message];
+  const type = describeErrorDetail(detail.type);
+  const description = describeErrorDetail(detail.description);
+  const cause = describeErrorDetail(detail.cause);
+  const context = describeErrorDetail(detail.context);
+
+  for (const item of [type, description, cause, context]) {
+    if (item && !parts.includes(item)) {
+      parts.push(item);
+    }
   }
-});
+
+  return parts.join(" | ");
+}
+
+function warnForSuspiciousBackendUrl(): void {
+  try {
+    const backendUrl = new URL(BACKEND_URL);
+    if (backendUrl.hostname.endsWith(".vercel.app")) {
+      console.warn(
+        "[BRIDGE] BACKEND_URL parece apontar para Vercel. A bridge deve apontar para o backend Node persistente (ex.: Render), nao para o frontend.",
+      );
+    }
+  } catch {
+    console.warn(`[BRIDGE] BACKEND_URL invalida: ${BACKEND_URL}`);
+  }
+}
+
+async function checkBackendHealth(): Promise<void> {
+  const healthUrl = buildBackendHealthUrl();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BACKEND_HEALTHCHECK_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(healthUrl, {
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.error(`[BRIDGE] backend respondeu ${healthUrl} com HTTP ${response.status}`);
+      return;
+    }
+
+    console.log(`[BRIDGE] backend acessivel em ${healthUrl}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[BRIDGE] nao foi possivel acessar ${healthUrl}: ${message}. Confira BACKEND_URL e se o backend esta rodando.`,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function connectBackend() {
+  const transports = parseSocketTransports(process.env.SOCKET_TRANSPORTS);
+  const socket = io(BACKEND_URL, {
+    ...(transports ? { transports } : {}),
+    auth: {
+      role: "bridge",
+      bridgeSecret: BRIDGE_SECRET,
+      bridgeName: BRIDGE_NAME,
+    },
+  });
+
+  socket.on("connect", () => {
+    const transport = socket.io.engine.transport.name;
+    console.log(`[BRIDGE] conectado ao backend (${BACKEND_URL}) via ${transport}`);
+  });
+
+  socket.io.engine.on("upgrade", (transport) => {
+    console.log(`[BRIDGE] transporte atualizado para ${transport.name}`);
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log(`[BRIDGE] desconectado: ${reason}`);
+  });
+
+  socket.on("connect_error", (error) => {
+    console.error(`[BRIDGE] erro de conexao: ${describeConnectError(error)}`);
+  });
+
+  socket.on("bridge:get-io-options", async (payload: { forceRefresh?: boolean }, callback?: (response: BridgeIoOptionsResponse) => void) => {
+    if (typeof callback !== "function") {
+      return;
+    }
+
+    try {
+      const options = await getIoOptions(Boolean(payload?.forceRefresh));
+      callback({
+        ok: true,
+        options,
+      });
+    } catch (error) {
+      callback({
+        ok: false,
+        error: error instanceof Error ? error.message : "BRIDGE_IO_OPTIONS_FAILED",
+      });
+    }
+  });
+
+  socket.on("x32", (event: X32Event) => {
+    try {
+      const command = toX32Osc(event);
+      const message = encodeOscMessage(command.path, [
+        { type: command.argType, value: command.value },
+      ]);
+
+      udpClient.send(message, X32_PORT, X32_IP, (error) => {
+        if (error) {
+          console.error(
+            `[BRIDGE][UDP_ERROR] token=${event.token} user=${event.user} path=${command.path} error=${error.message}`,
+          );
+          return;
+        }
+
+        console.log(
+          `[BRIDGE][SENT] token=${event.token} user=${event.user} path=${command.path} value=${command.value}`,
+        );
+      });
+    } catch (error) {
+      console.error(
+        `[BRIDGE][OSC_ERROR] token=${event.token} user=${event.user} error=${error instanceof Error ? error.message : "unknown"}`,
+      );
+    }
+  });
+
+  return socket;
+}
+
+warnForSuspiciousBackendUrl();
+void checkBackendHealth();
+connectBackend();
 
 udpClient.bind(() => {
   const address = udpClient.address();
