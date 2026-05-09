@@ -87,11 +87,31 @@ Campos principais:
 
 - `BACKEND_URL`: URL do backend Socket.io
 - `BRIDGE_SECRET`: mesmo valor do backend
-- `X32_IP`: IP da mesa X32
+- `X32_IP`: IP inicial da mesa X32, usado apenas como fallback
 - `X32_PORT`: porta UDP da X32 (default `10023`)
-- `USE_REAL_X32_IO`: `true` para consultar nomes reais da X32, `false` para mock
+- `USE_REAL_X32_IO`: valor inicial para consultar nomes reais da X32
 - `X32_QUERY_TIMEOUT_MS`: timeout por consulta OSC de nome
 - `IO_OPTIONS_CACHE_MS`: cache das opcoes de IO na bridge
+- `BRIDGE_UI_HOST`: interface da pagina local do bridge (default `127.0.0.1`)
+- `BRIDGE_UI_PORT`: porta da pagina local do bridge (default `3101`)
+
+### Interface local
+
+Ao iniciar o bridge, abra:
+
+```text
+http://localhost:3101
+```
+
+Nessa tela e possivel:
+
+- buscar mesas OSC/X32 na rede local
+- conectar na mesa encontrada sem editar `.env`
+- salvar a escolha em `bridge/bridge.config.json`
+- testar se a mesa responde
+- ver backend, IP da mesa, porta OSC, comandos enviados, erros UDP e redes do computador
+
+O arquivo `bridge.config.json` e configuracao de runtime e nao deve ser versionado.
 
 ### Executar
 

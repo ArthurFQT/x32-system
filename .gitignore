@@ -21,6 +21,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Runtime config
+bridge/bridge.config.json
+
 # OS/editor files
 .DS_Store
 Thumbs.db
