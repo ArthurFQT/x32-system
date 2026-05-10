@@ -1,4 +1,3 @@
-
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { busToString, formatDateTime, toggleSelection } from "@/lib/format";
 import { parseError } from "@/lib/api/http";
@@ -15,6 +14,39 @@ import type {
   TokensResponse,
 } from "@/types/app";
 
+// Globais
+import {
+  PageContainerTop,
+  CardAdmin,
+  Header,
+  HeaderActions,
+  Title,
+  SectionTitle,
+  Button,
+  ButtonSmall,
+  AlertMessage,
+  FieldLabel,
+  TextInput,
+  SelectInput,
+  FlexColumn,
+  FlexRow,
+} from "@/styles";
+
+// Específicos do admin
+import {
+  AdminOverviewGrid,
+  AdminSection,
+  QrPanel,
+  TokenActions,
+  DangerButton,
+  TableWrapper,
+  TokenTable,
+  RowActions,
+  LogsContainer,
+  OptionGridSmall,
+  OptionGridChannels,
+} from "./styles";
+
 const ADMIN_KEY_STORAGE = "x32_admin_key";
 
 export function AdminPage() {
@@ -29,21 +61,25 @@ export function AdminPage() {
 
   const [generateUser, setGenerateUser] = useState("musico");
   const [generateDuration, setGenerateDuration] = useState("60");
-  const [generateBusSelection, setGenerateBusSelection] = useState<number[]>([]);
-  const [generateChannelSelection, setGenerateChannelSelection] = useState<number[]>([]);
+  const [generateBusSelection, setGenerateBusSelection] = useState<number[]>(
+    [],
+  );
+  const [generateChannelSelection, setGenerateChannelSelection] = useState<
+    number[]
+  >([]);
 
   const [editTokenId, setEditTokenId] = useState<string>("");
   const [editUser, setEditUser] = useState("");
   const [editBusSelection, setEditBusSelection] = useState<number[]>([]);
-  const [editChannelSelection, setEditChannelSelection] = useState<number[]>([]);
+  const [editChannelSelection, setEditChannelSelection] = useState<number[]>(
+    [],
+  );
 
   const [qrView, setQrView] = useState<QrResponse | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(ADMIN_KEY_STORAGE);
-    if (saved) {
-      setAdminKey(saved);
-    }
+    if (saved) setAdminKey(saved);
   }, []);
 
   useEffect(() => {
@@ -56,20 +92,13 @@ export function AdminPage() {
       if (!headers.has("Content-Type") && init?.body !== undefined) {
         headers.set("Content-Type", "application/json");
       }
-
-      if (adminKey.trim()) {
-        headers.set("x-admin-key", adminKey.trim());
-      }
+      if (adminKey.trim()) headers.set("x-admin-key", adminKey.trim());
 
       const response = await fetch(`${SERVER_URL}${path}`, {
         ...init,
         headers,
       });
-
-      if (!response.ok) {
-        throw new Error(await parseError(response));
-      }
-
+      if (!response.ok) throw new Error(await parseError(response));
       return (await response.json()) as T;
     },
     [adminKey],
@@ -82,9 +111,10 @@ export function AdminPage() {
           apiRequest<OverviewResponse>("/admin/overview"),
           apiRequest<TokensResponse>("/tokens"),
           apiRequest<LogsResponse>("/admin/logs?limit=150"),
-          apiRequest<IoOptionsResponse>(`/admin/io-options${refreshIo ? "?refresh=true" : ""}`),
+          apiRequest<IoOptionsResponse>(
+            `/admin/io-options${refreshIo ? "?refresh=true" : ""}`,
+          ),
         ]);
-
         setOverview(overviewData);
         setTokens(tokenData.tokens);
         setLogs(logData.logs);
@@ -92,7 +122,11 @@ export function AdminPage() {
         setIoMode(ioData.mode);
         setError("");
       } catch (fetchError) {
-        setError(fetchError instanceof Error ? fetchError.message : "Falha ao carregar dados.");
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Falha ao carregar dados.",
+        );
       }
     },
     [apiRequest],
@@ -100,24 +134,18 @@ export function AdminPage() {
 
   useEffect(() => {
     void refreshData();
-    const timer = setInterval(() => {
-      void refreshData();
-    }, 5000);
+    const timer = setInterval(() => void refreshData(), 5000);
     return () => clearInterval(timer);
   }, [refreshData]);
 
   useEffect(() => {
-    if (!ioOptions) {
-      return;
-    }
-
-    if (generateBusSelection.length === 0) {
-      setGenerateBusSelection(ioOptions.buses.slice(0, 1).map((item) => item.id));
-    }
-
-    if (generateChannelSelection.length === 0) {
-      setGenerateChannelSelection(ioOptions.channels.slice(0, 3).map((item) => item.id));
-    }
+    if (!ioOptions) return;
+    if (generateBusSelection.length === 0)
+      setGenerateBusSelection(ioOptions.buses.slice(0, 1).map((b) => b.id));
+    if (generateChannelSelection.length === 0)
+      setGenerateChannelSelection(
+        ioOptions.channels.slice(0, 3).map((c) => c.id),
+      );
   }, [generateBusSelection.length, generateChannelSelection.length, ioOptions]);
 
   const doAction = async (actionId: string, action: () => Promise<void>) => {
@@ -127,7 +155,9 @@ export function AdminPage() {
       await refreshData();
       setError("");
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Acao falhou.");
+      setError(
+        actionError instanceof Error ? actionError.message : "Acao falhou.",
+      );
     } finally {
       setBusyAction("");
     }
@@ -135,25 +165,27 @@ export function AdminPage() {
 
   const submitGenerate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
-    if (generateBusSelection.length === 0 || generateChannelSelection.length === 0) {
+    if (
+      generateBusSelection.length === 0 ||
+      generateChannelSelection.length === 0
+    ) {
       setError("Selecione ao menos um BUS e um canal.");
       return;
     }
-
     const payload = {
       user: generateUser.trim(),
-      bus: generateBusSelection.length === 1 ? generateBusSelection[0] : generateBusSelection,
+      bus:
+        generateBusSelection.length === 1
+          ? generateBusSelection[0]
+          : generateBusSelection,
       allowedChannels: generateChannelSelection,
       durationMinutes: Number(generateDuration),
     };
-
     await doAction("generate", async () => {
       const result = await apiRequest<GenerateResponse>("/generate", {
         method: "POST",
         body: JSON.stringify(payload),
       });
-
       setQrView({
         token: result.token,
         accessUrl: result.accessUrl,
@@ -162,12 +194,10 @@ export function AdminPage() {
     });
   };
 
-  const loadQr = (tokenId: string) => {
+  const loadQr = (tokenId: string) =>
     void doAction(`qr-${tokenId}`, async () => {
-      const result = await apiRequest<QrResponse>(`/token/${tokenId}/qrcode`);
-      setQrView(result);
+      setQrView(await apiRequest<QrResponse>(`/token/${tokenId}/qrcode`));
     });
-  };
 
   const beginEdit = (token: AdminToken) => {
     setEditTokenId(token.id);
@@ -177,21 +207,17 @@ export function AdminPage() {
   };
 
   const saveEdit = () => {
-    if (!editTokenId) {
-      return;
-    }
-
+    if (!editTokenId) return;
     if (editBusSelection.length === 0 || editChannelSelection.length === 0) {
       setError("Selecione ao menos um BUS e um canal na edicao.");
       return;
     }
-
     const payload = {
       user: editUser.trim(),
-      bus: editBusSelection.length === 1 ? editBusSelection[0] : editBusSelection,
+      bus:
+        editBusSelection.length === 1 ? editBusSelection[0] : editBusSelection,
       allowedChannels: editChannelSelection,
     };
-
     void doAction(`edit-${editTokenId}`, async () => {
       await apiRequest(`/token/${editTokenId}`, {
         method: "PATCH",
@@ -200,45 +226,29 @@ export function AdminPage() {
     });
   };
 
-  const extendToken = (tokenId: string, minutes: number) => {
+  const extendToken = (tokenId: string, minutes: number) =>
     void doAction(`extend-${tokenId}-${minutes}`, async () => {
       await apiRequest(`/token/${tokenId}/extend`, {
         method: "POST",
         body: JSON.stringify({ minutes }),
       });
     });
-  };
 
-  const revokeToken = (tokenId: string) => {
+  const revokeToken = (tokenId: string) =>
     void doAction(`revoke-${tokenId}`, async () => {
-      await apiRequest(`/token/${tokenId}/revoke`, {
-        method: "POST",
-      });
+      await apiRequest(`/token/${tokenId}/revoke`, { method: "POST" });
     });
-  };
 
-  const enableToken = (tokenId: string) => {
+  const enableToken = (tokenId: string) =>
     void doAction(`enable-${tokenId}`, async () => {
-      await apiRequest(`/token/${tokenId}/enable`, {
-        method: "POST",
-      });
+      await apiRequest(`/token/${tokenId}/enable`, { method: "POST" });
     });
-  };
 
   const deleteToken = (tokenId: string) => {
-    const ok = window.confirm("Deseja remover este token?");
-    if (!ok) {
-      return;
-    }
-
+    if (!window.confirm("Deseja remover este token?")) return;
     void doAction(`delete-${tokenId}`, async () => {
-      await apiRequest(`/token/${tokenId}`, {
-        method: "DELETE",
-      });
-
-      if (editTokenId === tokenId) {
-        setEditTokenId("");
-      }
+      await apiRequest(`/token/${tokenId}`, { method: "DELETE" });
+      if (editTokenId === tokenId) setEditTokenId("");
     });
   };
 
@@ -248,35 +258,37 @@ export function AdminPage() {
   );
 
   return (
-    <div className="page admin-page">
-      <main className="card admin-card">
-        <header className="header admin-header">
-          <h1>Painel Admin X32</h1>
-          <div className="header-actions">
-            <button type="button" className="refresh" onClick={() => void refreshData()}>
+    <PageContainerTop>
+      <CardAdmin>
+        {/* ── Header ── */}
+        <Header>
+          <Title>Painel Admin X32</Title>
+          <HeaderActions>
+            <Button type="button" onClick={() => void refreshData()}>
               Atualizar
-            </button>
-            <button type="button" className="refresh" onClick={() => void refreshData(true)}>
+            </Button>
+            <Button type="button" onClick={() => void refreshData(true)}>
               Atualizar IO
-            </button>
-          </div>
-        </header>
+            </Button>
+          </HeaderActions>
+        </Header>
 
-        <section className="admin-key">
-          <label className="field">
-            <span>Chave admin (x-admin-key)</span>
-            <input
-              type="password"
-              value={adminKey}
-              onChange={(event) => setAdminKey(event.target.value)}
-              placeholder="opcional se ADMIN_API_KEY vazio"
-            />
-          </label>
-        </section>
+        {/* ── Chave admin ── */}
+        <div>
+          <FieldLabel htmlFor="admin-key">Chave admin (x-admin-key)</FieldLabel>
+          <TextInput
+            id="admin-key"
+            type="password"
+            value={adminKey}
+            onChange={(e) => setAdminKey(e.target.value)}
+            placeholder="opcional se ADMIN_API_KEY vazio"
+          />
+        </div>
 
-        {error && <p className="error">{error}</p>}
+        {error && <AlertMessage type="error">{error}</AlertMessage>}
 
-        <section className="overview-grid">
+        {/* ── Overview ── */}
+        <AdminOverviewGrid columns={3}>
           <article>
             <h3>Bridge</h3>
             <p>{overview?.bridgeConnected ? "Conectada" : "Desconectada"}</p>
@@ -301,79 +313,95 @@ export function AdminPage() {
             <h3>Fonte IO</h3>
             <p>{ioOptions?.source ?? "-"}</p>
           </article>
-        </section>
+        </AdminOverviewGrid>
 
-        <section className="admin-section">
-          <h2>Gerar acesso</h2>
-          <form className="admin-form" onSubmit={submitGenerate}>
-            <label className="field">
-              <span>Usuario</span>
-              <input
-                type="text"
-                value={generateUser}
-                onChange={(event) => setGenerateUser(event.target.value)}
-                placeholder="Nome do musico"
-                required
-              />
-            </label>
-
-            <label className="field">
-              <span>Duracao (minutos)</span>
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={generateDuration}
-                onChange={(event) => setGenerateDuration(event.target.value)}
-                required
-              />
-            </label>
-
-            <div className="field full-width">
-              <span>BUS disponiveis</span>
-              <div className="option-grid small-grid">
-                {ioOptions?.buses.map((bus) => (
-                  <label className="option-pill" key={`gen-bus-${bus.id}`}>
-                    <input
-                      type="checkbox"
-                      checked={generateBusSelection.includes(bus.id)}
-                      onChange={() => setGenerateBusSelection((prev) => toggleSelection(prev, bus.id))}
-                    />
-                    <span>{bus.label}</span>
-                  </label>
-                ))}
+        {/* ── Gerar acesso ── */}
+        <AdminSection>
+          <SectionTitle>Gerar acesso</SectionTitle>
+          <form onSubmit={submitGenerate}>
+            <FlexColumn>
+              <div>
+                <FieldLabel htmlFor="gen-user">Usuario</FieldLabel>
+                <TextInput
+                  id="gen-user"
+                  type="text"
+                  value={generateUser}
+                  onChange={(e) => setGenerateUser(e.target.value)}
+                  placeholder="Nome do musico"
+                  required
+                />
               </div>
-            </div>
 
-            <div className="field full-width">
-              <span>Canais disponiveis</span>
-              <div className="option-grid channel-grid">
-                {ioOptions?.channels.map((channel) => (
-                  <label className="option-pill" key={`gen-channel-${channel.id}`}>
-                    <input
-                      type="checkbox"
-                      checked={generateChannelSelection.includes(channel.id)}
-                      onChange={() =>
-                        setGenerateChannelSelection((prev) => toggleSelection(prev, channel.id))
-                      }
-                    />
-                    <span>{channel.label}</span>
-                  </label>
-                ))}
+              <div>
+                <FieldLabel htmlFor="gen-duration">
+                  Duracao (minutos)
+                </FieldLabel>
+                <TextInput
+                  id="gen-duration"
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={generateDuration}
+                  onChange={(e) => setGenerateDuration(e.target.value)}
+                  required
+                />
               </div>
-            </div>
 
-            <div className="full-width">
-              <button type="submit" disabled={busyAction === "generate"}>
-                {busyAction === "generate" ? "Gerando..." : "Gerar token"}
-              </button>
-            </div>
+              <div>
+                <FieldLabel as="span">BUS disponiveis</FieldLabel>
+                <OptionGridSmall>
+                  {ioOptions?.buses.map((bus) => (
+                    <label key={`gen-bus-${bus.id}`}>
+                      <input
+                        type="checkbox"
+                        checked={generateBusSelection.includes(bus.id)}
+                        onChange={() =>
+                          setGenerateBusSelection((prev) =>
+                            toggleSelection(prev, bus.id),
+                          )
+                        }
+                      />
+                      <span>{bus.label}</span>
+                    </label>
+                  ))}
+                </OptionGridSmall>
+              </div>
+
+              <div>
+                <FieldLabel as="span">Canais disponiveis</FieldLabel>
+                <OptionGridChannels>
+                  {ioOptions?.channels.map((channel) => (
+                    <label key={`gen-channel-${channel.id}`}>
+                      <input
+                        type="checkbox"
+                        checked={generateChannelSelection.includes(channel.id)}
+                        onChange={() =>
+                          setGenerateChannelSelection((prev) =>
+                            toggleSelection(prev, channel.id),
+                          )
+                        }
+                      />
+                      <span>{channel.label}</span>
+                    </label>
+                  ))}
+                </OptionGridChannels>
+              </div>
+
+              <div>
+                <Button type="submit" disabled={busyAction === "generate"}>
+                  {busyAction === "generate" ? "Gerando..." : "Gerar token"}
+                </Button>
+              </div>
+            </FlexColumn>
           </form>
 
           {qrView && (
-            <div className="qr-panel">
-              <img src={qrView.qrCodeDataUrl} alt={`QR token ${qrView.token}`} />
-              <div>
+            <QrPanel>
+              <img
+                src={qrView.qrCodeDataUrl}
+                alt={`QR token ${qrView.token}`}
+              />
+              <FlexColumn>
                 <p>
                   <strong>Token:</strong> {qrView.token}
                 </p>
@@ -383,25 +411,23 @@ export function AdminPage() {
                 <a href={qrView.accessUrl} target="_blank" rel="noreferrer">
                   {qrView.accessUrl}
                 </a>
-              </div>
-            </div>
+              </FlexColumn>
+            </QrPanel>
           )}
-        </section>
+        </AdminSection>
 
-        <section className="admin-section">
-          <h2>Editar token</h2>
-          <div className="admin-form">
-            <label className="field">
-              <span>Token</span>
-              <select
+        {/* ── Editar token ── */}
+        <AdminSection>
+          <SectionTitle>Editar token</SectionTitle>
+          <FlexColumn>
+            <div>
+              <FieldLabel htmlFor="edit-token-select">Token</FieldLabel>
+              <SelectInput
+                id="edit-token-select"
                 value={editTokenId}
-                onChange={(event) => {
-                  const token = tokens.find((item) => item.id === event.target.value);
-                  if (token) {
-                    beginEdit(token);
-                  } else {
-                    setEditTokenId("");
-                  }
+                onChange={(e) => {
+                  const token = tokens.find((t) => t.id === e.target.value);
+                  token ? beginEdit(token) : setEditTokenId("");
                 }}
               >
                 <option value="">Selecione um token</option>
@@ -410,85 +436,110 @@ export function AdminPage() {
                     {token.user} - {token.id.slice(0, 8)} - {token.status}
                   </option>
                 ))}
-              </select>
-            </label>
+              </SelectInput>
+            </div>
 
-            <label className="field">
-              <span>Usuario</span>
-              <input
+            <div>
+              <FieldLabel htmlFor="edit-user">Usuario</FieldLabel>
+              <TextInput
+                id="edit-user"
                 type="text"
                 value={editUser}
-                onChange={(event) => setEditUser(event.target.value)}
+                onChange={(e) => setEditUser(e.target.value)}
                 disabled={!editTokenId}
               />
-            </label>
+            </div>
 
-            <div className="field full-width">
-              <span>BUS autorizados</span>
-              <div className="option-grid small-grid">
+            <div>
+              <FieldLabel as="span">BUS autorizados</FieldLabel>
+              <OptionGridSmall>
                 {ioOptions?.buses.map((bus) => (
-                  <label className="option-pill" key={`edit-bus-${bus.id}`}>
+                  <label key={`edit-bus-${bus.id}`}>
                     <input
                       type="checkbox"
                       checked={editBusSelection.includes(bus.id)}
-                      onChange={() => setEditBusSelection((prev) => toggleSelection(prev, bus.id))}
+                      onChange={() =>
+                        setEditBusSelection((prev) =>
+                          toggleSelection(prev, bus.id),
+                        )
+                      }
                       disabled={!editTokenId}
                     />
                     <span>{bus.label}</span>
                   </label>
                 ))}
-              </div>
+              </OptionGridSmall>
             </div>
 
-            <div className="field full-width">
-              <span>Canais autorizados</span>
-              <div className="option-grid channel-grid">
+            <div>
+              <FieldLabel as="span">Canais autorizados</FieldLabel>
+              <OptionGridChannels>
                 {ioOptions?.channels.map((channel) => (
-                  <label className="option-pill" key={`edit-channel-${channel.id}`}>
+                  <label key={`edit-channel-${channel.id}`}>
                     <input
                       type="checkbox"
                       checked={editChannelSelection.includes(channel.id)}
-                      onChange={() => setEditChannelSelection((prev) => toggleSelection(prev, channel.id))}
+                      onChange={() =>
+                        setEditChannelSelection((prev) =>
+                          toggleSelection(prev, channel.id),
+                        )
+                      }
                       disabled={!editTokenId}
                     />
                     <span>{channel.label}</span>
                   </label>
                 ))}
-              </div>
+              </OptionGridChannels>
             </div>
 
-            <div className="full-width">
-              <button type="button" onClick={saveEdit} disabled={!editTokenId}>
+            <div>
+              <Button type="button" onClick={saveEdit} disabled={!editTokenId}>
                 Salvar alteracoes
-              </button>
+              </Button>
             </div>
-          </div>
+          </FlexColumn>
 
           {selectedToken && (
-            <div className="token-inline-actions">
-              <button type="button" onClick={() => extendToken(selectedToken.id, 30)}>
+            <TokenActions>
+              <ButtonSmall
+                type="button"
+                onClick={() => extendToken(selectedToken.id, 30)}
+              >
                 +30m
-              </button>
-              <button type="button" onClick={() => extendToken(selectedToken.id, 120)}>
+              </ButtonSmall>
+              <ButtonSmall
+                type="button"
+                onClick={() => extendToken(selectedToken.id, 120)}
+              >
                 +2h
-              </button>
-              <button type="button" onClick={() => enableToken(selectedToken.id)}>
+              </ButtonSmall>
+              <ButtonSmall
+                type="button"
+                onClick={() => enableToken(selectedToken.id)}
+              >
                 Ativar
-              </button>
-              <button type="button" onClick={() => revokeToken(selectedToken.id)}>
+              </ButtonSmall>
+              <ButtonSmall
+                type="button"
+                onClick={() => revokeToken(selectedToken.id)}
+              >
                 Revogar
-              </button>
-              <button type="button" className="danger" onClick={() => deleteToken(selectedToken.id)}>
+              </ButtonSmall>
+              <DangerButton
+                type="button"
+                onClick={() => deleteToken(selectedToken.id)}
+              >
                 Excluir
-              </button>
-            </div>
+              </DangerButton>
+            </TokenActions>
           )}
-        </section>
+        </AdminSection>
 
-        <section className="admin-section">
-          <h2>Tokens</h2>
-          <div className="table-wrap">
-            <table className="token-table">
+        {/* ── Tokens ── */}
+        <AdminSection>
+          <SectionTitle>Tokens</SectionTitle>
+          <TableWrapper>
+            <TokenTable>
               <thead>
                 <tr>
                   <th>Usuario</th>
@@ -511,38 +562,71 @@ export function AdminPage() {
                     <td>{token.allowedChannels.join(",")}</td>
                     <td>{formatDateTime(token.expiresAt)}</td>
                     <td>
-                      <div className="row-actions">
-                        <button type="button" onClick={() => window.open(token.accessUrl, "_blank")}>Abrir</button>
-                        <button
+                      <RowActions>
+                        <ButtonSmall
+                          type="button"
+                          onClick={() => window.open(token.accessUrl, "_blank")}
+                        >
+                          Abrir
+                        </ButtonSmall>
+                        <ButtonSmall
                           type="button"
                           onClick={() => loadQr(token.id)}
                           disabled={busyAction.startsWith(`qr-${token.id}`)}
                         >
                           QR
-                        </button>
-                        <button type="button" onClick={() => beginEdit(token)}>Editar</button>
-                        <button type="button" onClick={() => extendToken(token.id, 30)}>+30m</button>
-                        <button type="button" onClick={() => enableToken(token.id)}>Ativar</button>
-                        <button type="button" onClick={() => revokeToken(token.id)}>Revogar</button>
-                        <button type="button" className="danger" onClick={() => deleteToken(token.id)}>Excluir</button>
-                      </div>
+                        </ButtonSmall>
+                        <ButtonSmall
+                          type="button"
+                          onClick={() => beginEdit(token)}
+                        >
+                          Editar
+                        </ButtonSmall>
+                        <ButtonSmall
+                          type="button"
+                          onClick={() => extendToken(token.id, 30)}
+                        >
+                          +30m
+                        </ButtonSmall>
+                        <ButtonSmall
+                          type="button"
+                          onClick={() => enableToken(token.id)}
+                        >
+                          Ativar
+                        </ButtonSmall>
+                        <ButtonSmall
+                          type="button"
+                          onClick={() => revokeToken(token.id)}
+                        >
+                          Revogar
+                        </ButtonSmall>
+                        <DangerButton
+                          type="button"
+                          onClick={() => deleteToken(token.id)}
+                        >
+                          Excluir
+                        </DangerButton>
+                      </RowActions>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
-        </section>
+            </TokenTable>
+          </TableWrapper>
+        </AdminSection>
 
-        <section className="admin-section">
-          <h2>Logs</h2>
-          <div className="logs">
+        {/* ── Logs ── */}
+        <AdminSection>
+          <SectionTitle>Logs</SectionTitle>
+          <LogsContainer>
             {logs.map((entry, idx) => (
-              <pre key={`${entry.timestamp}-${entry.action}-${idx}`}>{JSON.stringify(entry)}</pre>
+              <pre key={`${entry.timestamp}-${entry.action}-${idx}`}>
+                {JSON.stringify(entry)}
+              </pre>
             ))}
-          </div>
-        </section>
-      </main>
-    </div>
+          </LogsContainer>
+        </AdminSection>
+      </CardAdmin>
+    </PageContainerTop>
   );
 }

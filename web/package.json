@@ -14,9 +14,11 @@
     "preview:prod": "vite preview --mode prod"
   },
   "dependencies": {
+    "@types/styled-components": "^5.1.36",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "styled-components": "^6.4.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

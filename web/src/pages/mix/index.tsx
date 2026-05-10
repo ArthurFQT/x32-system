@@ -1,8 +1,30 @@
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { SERVER_URL } from "@/lib/env";
 import { formatDateTime, formatTimeLeft } from "@/lib/format";
+import {
+  PageContainer,
+  CardWide,
+  Header,
+  Title,
+  StatusPill,
+  AlertMessage,
+  MetaGrid,
+  MetaItem,
+} from "@/styles";
+import {
+  BusSelectionContainer,
+  BusButton,
+  ChannelsSection,
+  ControlCard,
+  ControlHeader,
+  ControlTitle,
+  ControlGroup,
+  ControlLabel,
+  RangeInput,
+  MuteButton,
+  MixMetaGrid,
+} from "./styles";
 import type {
   BlockPayload,
   BridgeStatusPayload,
@@ -76,7 +98,9 @@ export function MixPage() {
   const [currentBus, setCurrentBus] = useState<number | null>(null);
   const [availableBuses, setAvailableBuses] = useState<number[]>([]);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
-  const [controlsByBus, setControlsByBus] = useState<Record<number, ChannelControl[]>>({});
+  const [controlsByBus, setControlsByBus] = useState<
+    Record<number, ChannelControl[]>
+  >({});
   const [channels, setChannels] = useState<ChannelControl[]>([]);
   const [bridgeConnected, setBridgeConnected] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
@@ -123,7 +147,12 @@ export function MixPage() {
   }, []);
 
   const queueControl = useCallback(
-    (eventName: "control:volume", bus: number, channel: number, value: number) => {
+    (
+      eventName: "control:volume",
+      bus: number,
+      channel: number,
+      value: number,
+    ) => {
       const key = `${eventName}:${bus}:${channel}`;
       queuedControlsRef.current.set(key, {
         eventName,
@@ -136,7 +165,10 @@ export function MixPage() {
         return;
       }
 
-      flushTimerRef.current = window.setTimeout(flushQueuedControls, CONTROL_FLUSH_MS);
+      flushTimerRef.current = window.setTimeout(
+        flushQueuedControls,
+        CONTROL_FLUSH_MS,
+      );
     },
     [flushQueuedControls],
   );
@@ -184,7 +216,9 @@ export function MixPage() {
       setBridgeConnected(payload.connected);
       if (payload.connected) {
         setError((current) =>
-          current === controlErrorMessage("BRIDGE_NOT_CONNECTED") ? "" : current,
+          current === controlErrorMessage("BRIDGE_NOT_CONNECTED")
+            ? ""
+            : current,
         );
       }
     });
@@ -206,7 +240,11 @@ export function MixPage() {
 
     socket.on("disconnect", () => {
       setStatus((current) => {
-        if (current === "revoked" || current === "expired" || current === "invalid") {
+        if (
+          current === "revoked" ||
+          current === "expired" ||
+          current === "invalid"
+        ) {
           return current;
         }
         return "offline";
@@ -356,105 +394,126 @@ export function MixPage() {
       : "";
 
   return (
-    <div className="page">
-      <main className="card musician-card">
-        <header className="header">
-          <h1>X32 Monitor Control</h1>
-          <span className={`status status-${status}`}>{statusLabel[status]}</span>
-        </header>
+    <PageContainer>
+      <CardWide>
+        <Header>
+          <Title>X32 Monitor Control</Title>
+          <StatusPill status={status}>{statusLabel[status]}</StatusPill>
+        </Header>
 
-        <section className="meta musician-meta">
-          <p>
+        <MixMetaGrid>
+          <MetaItem>
             <strong>Musico:</strong> {user}
-          </p>
-          <p>
+          </MetaItem>
+          <MetaItem>
             <strong>BUS ativo:</strong> {currentBus ?? "-"}
-          </p>
-          <p>
+          </MetaItem>
+          <MetaItem>
             <strong>Expira em:</strong> {formatTimeLeft(expiresAt, nowTs)} (
             {formatDateTime(expiresAt)})
-          </p>
-          <p>
-            <strong>Bridge:</strong> {bridgeConnected ? "conectada" : "desconectada"}
-          </p>
-        </section>
+          </MetaItem>
+          <MetaItem>
+            <strong>Bridge:</strong>{" "}
+            {bridgeConnected ? "conectada" : "desconectada"}
+          </MetaItem>
+        </MixMetaGrid>
 
-        {error && <p className="error">{error}</p>}
-        {bridgeWarning && <p className="warning">{bridgeWarning}</p>}
+        {error && <AlertMessage type="error">{error}</AlertMessage>}
+        {bridgeWarning && (
+          <AlertMessage type="warning">{bridgeWarning}</AlertMessage>
+        )}
 
         {availableBuses.length > 0 && (
-          <section className="bus-selection">
+          <BusSelectionContainer>
             {availableBuses.map((bus) => (
-              <button
+              <BusButton
                 key={`bus-${bus}`}
-                type="button"
-                className={bus === currentBus ? "bus-button active" : "bus-button"}
+                isActive={bus === currentBus}
                 onClick={() => setCurrentBus(bus)}
                 disabled={controlsDisabled}
               >
                 BUS {bus}
-              </button>
+              </BusButton>
             ))}
-          </section>
+          </BusSelectionContainer>
         )}
 
-        <section className={`channels ${controlsDisabled ? "disabled" : ""}`}>
+        <ChannelsSection disabled={controlsDisabled}>
           {channels.map((channelData) => {
             const volumePercent = Math.round(channelData.volume * 100);
+            const panPercent = Math.round((channelData.pan + 1) * 50);
 
             return (
-              <article className="channel-card fader-card" key={channelData.channel}>
-                <div className="fader-header">
-                  <h2>Canal {channelData.channel}</h2>
-                  <span className="value-chip">Vol {volumePercent}%</span>
-                </div>
+              <ControlCard key={channelData.channel}>
+                <ControlHeader>
+                  <ControlTitle>Canal {channelData.channel}</ControlTitle>
+                  <StatusPill status="active">{volumePercent}%</StatusPill>
+                </ControlHeader>
 
-                <label className="field-label" htmlFor={`volume-${channelData.channel}`}>
-                  Fader de volume
-                </label>
-                <input
-                  id={`volume-${channelData.channel}`}
-                  className="fader-input"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={channelData.volume}
-                  style={sliderStyle(volumePercent)}
-                  disabled={controlsDisabled}
-                  onChange={(event) => onVolumeInput(channelData.channel, Number(event.target.value))}
-                  onMouseUp={flushOnRelease}
-                  onTouchEnd={flushOnRelease}
-                />
+                <ControlGroup>
+                  <ControlLabel htmlFor={`volume-${channelData.channel}`}>
+                    Fader de volume
+                  </ControlLabel>
+                  <RangeInput
+                    id={`volume-${channelData.channel}`}
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={channelData.volume}
+                    percent={volumePercent}
+                    disabled={controlsDisabled}
+                    onChange={(event) =>
+                      onVolumeInput(
+                        channelData.channel,
+                        Number(event.target.value),
+                      )
+                    }
+                    onMouseUp={flushOnRelease}
+                    onTouchEnd={flushOnRelease}
+                  />
+                </ControlGroup>
 
-                <label className="field-label" htmlFor={`pan-${channelData.channel}`}>
-                  Pan
-                </label>
-                <input
-                  id={`pan-${channelData.channel}`}
-                  className="fader-input"
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  value={channelData.pan}
-                  disabled={controlsDisabled}
-                  onChange={(event) => onPanInput(channelData.channel, Number(event.target.value))}
-                />
+                <ControlGroup>
+                  <ControlLabel htmlFor={`pan-${channelData.channel}`}>
+                    Pan
+                  </ControlLabel>
+                  <RangeInput
+                    id={`pan-${channelData.channel}`}
+                    type="range"
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    value={channelData.pan}
+                    percent={panPercent}
+                    disabled={controlsDisabled}
+                    onChange={(event) =>
+                      onPanInput(
+                        channelData.channel,
+                        Number(event.target.value),
+                      )
+                    }
+                  />
+                </ControlGroup>
 
-                <button
+                <MuteButton
                   type="button"
+                  muted={channelData.mute === 1}
                   disabled={controlsDisabled}
-                  className={channelData.mute === 1 ? "mute active" : "mute"}
-                  onClick={() => sendMute(channelData.channel, channelData.mute === 1 ? 0 : 1)}
+                  onClick={() =>
+                    sendMute(
+                      channelData.channel,
+                      channelData.mute === 1 ? 0 : 1,
+                    )
+                  }
                 >
                   {channelData.mute === 1 ? "Desmutar" : "Mutar"}
-                </button>
-              </article>
+                </MuteButton>
+              </ControlCard>
             );
           })}
-        </section>
-      </main>
-    </div>
+        </ChannelsSection>
+      </CardWide>
+    </PageContainer>
   );
 }

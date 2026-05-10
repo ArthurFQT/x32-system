@@ -1,8 +1,7 @@
-
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { GlobalStyle } from "@/styles";
 import { AppRouter } from "@/app/router";
-import "@/index.css";
 
 const rootElement = document.getElementById("root");
 
@@ -12,6 +11,7 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
+    <GlobalStyle />
     <AppRouter />
   </React.StrictMode>,
 );

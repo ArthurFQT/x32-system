@@ -1,18 +1,20 @@
+import { PageContainer, Card, Title, List } from "@/styles";
+
 export function HomePage() {
   return (
-    <div className="page">
-      <main className="card home-card">
-        <h1>X32 Monitor Control</h1>
+    <PageContainer>
+      <Card>
+        <Title>X32 Monitor Control</Title>
         <p>Escolha uma rota:</p>
-        <ul>
+        <List>
           <li>
             <a href="/admin">/admin</a>
           </li>
           <li>
             <a href="/mix">/mix?token=SEU_TOKEN</a>
           </li>
-        </ul>
-      </main>
-    </div>
+        </List>
+      </Card>
+    </PageContainer>
   );
 }
