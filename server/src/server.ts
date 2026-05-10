@@ -404,12 +404,17 @@ function handleControl(
 
   const token = validation.token;
 
+  if (!bridgeConnected()) {
+    callback?.({ ok: false, error: "BRIDGE_NOT_CONNECTED" });
+    return;
+  }
+
   try {
     const payload = parseControlPayload(rawPayload);
 
-    const bus = payload.bus ?? token.bus[0];
+    const bus = payload.bus !== undefined ? payload.bus : token.bus[0];
     if (!token.bus.includes(bus)) {
-      callback?.({ ok: false, error: "BUS_NOT_ALLOWED" });
+      callback?.({ ok: false, error: "BUS_LOCKED_TO_TOKEN" });
       return;
     }
 
@@ -433,8 +438,6 @@ function handleControl(
 
     if (type === "volume") {
       channelControl.volume = value;
-    } else if (type === "pan") {
-      channelControl.pan = value;
     } else {
       channelControl.mute = value as 0 | 1;
     }
@@ -862,24 +865,27 @@ io.on("connection", (socket) => {
 
   const token = validation.token;
   socket.join(tokenRoom(token.id));
+  const sessionBus = token.bus[0];
+
+  const controlsByBus = token.bus.reduce<Record<number, ChannelControl[]>>((acc, bus) => {
+    const busControls = token.controlsByBus[bus] ?? {};
+    acc[bus] = token.allowedChannels.map((channel) => ({
+      channel,
+      ...(busControls[channel] ?? { volume: 0.75, pan: 0, mute: 0 }),
+    }));
+    return acc;
+  }, {});
 
   socket.emit("session:init", {
     token: token.id,
     user: token.user,
-    bus: token.bus[0],
+    bus: sessionBus,
     buses: token.bus,
     allowedChannels: token.allowedChannels,
     enabled: token.enabled,
     expiresAt: token.expiresAt,
     bridgeConnected: bridgeConnected(),
-    controlsByBus: token.bus.reduce<Record<number, ChannelControl[]>>((acc, bus) => {
-      const busControls = token.controlsByBus[bus] ?? {};
-      acc[bus] = token.allowedChannels.map((channel) => ({
-        channel,
-        ...(busControls[channel] ?? { volume: 0.75, pan: 0, mute: 0 }),
-      }));
-      return acc;
-    }, {}),
+    controlsByBus,
   });
 
   socket.on("control:volume", (payload, callback?: (ack: ControlAck) => void) => {

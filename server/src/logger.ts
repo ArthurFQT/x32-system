@@ -9,6 +9,7 @@ export type LogAction =
   | "CONTROL_VOLUME"
   | "CONTROL_PAN"
   | "CONTROL_MUTE"
+  | "CONTROL_REJECTED"
   | "SOCKET_AUTH_FAILED"
   | "ADMIN_AUTH_FAILED";
 

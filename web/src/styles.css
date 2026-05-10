@@ -123,37 +123,16 @@ a {
   background: #222;
 }
 
-.bus-selector {
-  margin-top: 10px;
-  border: 1px solid #2d2d2d;
-  border-radius: 8px;
-  background: #1f1f1f;
-  padding: 10px;
-}
-
-.bus-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.bus-chip {
-  border: 1px solid #3a3a3a;
-  background: #141414;
-  color: #d6d6d6;
-  border-radius: 999px;
-  padding: 6px 12px;
-}
-
-.bus-chip.active {
-  border-color: #68b2ff;
-  background: #193149;
-  color: #cfe8ff;
-}
-
 .error {
   margin: 12px 0;
   color: #ff9f9f;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.warning {
+  margin: 12px 0;
+  color: #ffd28a;
   font-weight: 600;
   word-break: break-word;
 }
@@ -242,19 +221,6 @@ a {
 
 .fader-input:active::-moz-range-thumb {
   transform: scale(1.08);
-}
-
-.pan-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.pan-hints {
-  display: flex;
-  gap: 8px;
-  font-size: 0.72rem;
-  color: #aab8c8;
 }
 
 input,

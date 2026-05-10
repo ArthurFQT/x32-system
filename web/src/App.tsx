@@ -125,9 +125,9 @@ type ApiError = {
 };
 
 type QueuedControl = {
-  eventName: "control:volume" | "control:pan";
-  channel: number;
+  eventName: "control:volume";
   bus: number;
+  channel: number;
   value: number;
 };
 
@@ -226,6 +226,23 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
+function controlErrorMessage(error?: string): string {
+  const messages: Record<string, string> = {
+    BRIDGE_NOT_CONNECTED: "Bridge local desconectada.",
+    BUS_LOCKED_TO_TOKEN: "BUS bloqueado para este acesso.",
+    CHANNEL_NOT_ALLOWED: "Canal nao autorizado.",
+    CONTROL_NOT_ALLOWED: "Controle nao permitido.",
+    TOKEN_EXPIRED: "Seu acesso expirou.",
+    TOKEN_REVOKED: "Seu acesso foi revogado.",
+  };
+
+  if (!error) {
+    return "Falha no controle.";
+  }
+
+  return messages[error] ?? error;
+}
+
 function sliderStyle(percent: number): Record<string, string> {
   return {
     background: `linear-gradient(90deg, #6fb7ff 0%, #6fb7ff ${percent}%, #2a2a2a ${percent}%, #2a2a2a 100%)`,
@@ -270,23 +287,28 @@ function MixView() {
     for (const payload of payloads) {
       socket.emit(
         payload.eventName,
-        { channel: payload.channel, bus: payload.bus, value: payload.value },
+        { bus: payload.bus, channel: payload.channel, value: payload.value },
         (ack: ControlAck) => {
-        if (!ack?.ok) {
-          setError(ack?.error ?? "Falha no controle.");
-          if (ack?.blockedReason === "expired") {
-            setStatus("expired");
-          } else if (ack?.blockedReason === "revoked") {
-            setStatus("revoked");
+          if (!ack?.ok) {
+            setError(controlErrorMessage(ack?.error));
+            if (ack?.error === "BRIDGE_NOT_CONNECTED") {
+              setBridgeConnected(false);
+            }
+            if (ack?.blockedReason === "expired") {
+              setStatus("expired");
+            } else if (ack?.blockedReason === "revoked") {
+              setStatus("revoked");
+            }
+          } else {
+            setError("");
           }
-        }
         },
       );
     }
   }, []);
 
   const queueControl = useCallback(
-    (eventName: "control:volume" | "control:pan", bus: number, channel: number, value: number) => {
+    (eventName: "control:volume", bus: number, channel: number, value: number) => {
       const key = `${eventName}:${bus}:${channel}`;
       queuedControlsRef.current.set(key, {
         eventName,
@@ -318,7 +340,6 @@ function MixView() {
     }
 
     const socket = io(SERVER_URL, {
-      transports: ["websocket"],
       auth: {
         role: "musician",
         token,
@@ -334,8 +355,8 @@ function MixView() {
 
     socket.on("session:init", (payload: SessionInitPayload) => {
       setUser(payload.user);
-      setCurrentBus(payload.bus);
       setAvailableBuses(payload.buses);
+      setCurrentBus(payload.bus);
       setExpiresAt(payload.expiresAt);
       setControlsByBus(payload.controlsByBus);
       setChannels(payload.controlsByBus[payload.bus] ?? []);
@@ -346,6 +367,11 @@ function MixView() {
 
     socket.on("bridge:status", (payload: BridgeStatusPayload) => {
       setBridgeConnected(payload.connected);
+      if (payload.connected) {
+        setError((current) =>
+          current === controlErrorMessage("BRIDGE_NOT_CONNECTED") ? "" : current,
+        );
+      }
     });
 
     socket.on("session:blocked", (payload: BlockPayload) => {
@@ -390,6 +416,16 @@ function MixView() {
   }, [expiresAt, nowTs, status]);
 
   useEffect(() => {
+    if (availableBuses.length === 0) {
+      return;
+    }
+
+    if (currentBus === null || !availableBuses.includes(currentBus)) {
+      setCurrentBus(availableBuses[0]);
+    }
+  }, [availableBuses, currentBus]);
+
+  useEffect(() => {
     if (currentBus === null) {
       setChannels([]);
       return;
@@ -398,7 +434,7 @@ function MixView() {
     setChannels(controlsByBus[currentBus] ?? []);
   }, [controlsByBus, currentBus]);
 
-  const controlsDisabled = status !== "active";
+  const controlsDisabled = status !== "active" || !bridgeConnected;
 
   const updateLocalControl = useCallback(
     (bus: number, channel: number, patch: Partial<ChannelControl>) => {
@@ -431,16 +467,25 @@ function MixView() {
       }
 
       updateLocalControl(currentBus, channel, { mute: value });
-      socket.emit("control:mute", { channel, bus: currentBus, value }, (ack: ControlAck) => {
-        if (!ack?.ok) {
-          setError(ack?.error ?? "Falha no controle.");
-          if (ack?.blockedReason === "expired") {
-            setStatus("expired");
-          } else if (ack?.blockedReason === "revoked") {
-            setStatus("revoked");
+      socket.emit(
+        "control:mute",
+        { bus: currentBus, channel, value },
+        (ack: ControlAck) => {
+          if (!ack?.ok) {
+            setError(controlErrorMessage(ack?.error));
+            if (ack?.error === "BRIDGE_NOT_CONNECTED") {
+              setBridgeConnected(false);
+            }
+            if (ack?.blockedReason === "expired") {
+              setStatus("expired");
+            } else if (ack?.blockedReason === "revoked") {
+              setStatus("revoked");
+            }
+          } else {
+            setError("");
           }
-        }
-      });
+        },
+      );
     },
     [controlsDisabled, currentBus, updateLocalControl],
   );
@@ -449,6 +494,7 @@ function MixView() {
     if (controlsDisabled || currentBus === null) {
       return;
     }
+
     updateLocalControl(currentBus, channel, { volume: value });
     queueControl("control:volume", currentBus, channel, value);
   };
@@ -457,13 +503,42 @@ function MixView() {
     if (controlsDisabled || currentBus === null) {
       return;
     }
+
     updateLocalControl(currentBus, channel, { pan: value });
-    queueControl("control:pan", currentBus, channel, value);
+    const socket = socketRef.current;
+    if (!socket) {
+      return;
+    }
+
+    socket.emit(
+      "control:pan",
+      { bus: currentBus, channel, value },
+      (ack: ControlAck) => {
+        if (!ack?.ok) {
+          setError(controlErrorMessage(ack?.error));
+          if (ack?.error === "BRIDGE_NOT_CONNECTED") {
+            setBridgeConnected(false);
+          }
+          if (ack?.blockedReason === "expired") {
+            setStatus("expired");
+          } else if (ack?.blockedReason === "revoked") {
+            setStatus("revoked");
+          }
+        } else {
+          setError("");
+        }
+      },
+    );
   };
 
   const flushOnRelease = () => {
     flushQueuedControls();
   };
+
+  const bridgeWarning =
+    status === "active" && !bridgeConnected
+      ? "A bridge local esta desconectada. Os controles ficam bloqueados ate ela conectar."
+      : "";
 
   return (
     <div className="page">
@@ -489,31 +564,28 @@ function MixView() {
           </p>
         </section>
 
-        {availableBuses.length > 1 && (
-          <section className="bus-selector">
-            <span className="field-label">Selecione o BUS para controlar:</span>
-            <div className="bus-chips">
-              {availableBuses.map((busId) => (
-                <button
-                  key={busId}
-                  type="button"
-                  className={currentBus === busId ? "bus-chip active" : "bus-chip"}
-                  onClick={() => setCurrentBus(busId)}
-                  disabled={controlsDisabled}
-                >
-                  Bus {busId}
-                </button>
-              ))}
-            </div>
+        {error && <p className="error">{error}</p>}
+        {bridgeWarning && <p className="warning">{bridgeWarning}</p>}
+
+        {availableBuses.length > 0 && (
+          <section className="bus-selection">
+            {availableBuses.map((bus) => (
+              <button
+                key={`bus-${bus}`}
+                type="button"
+                className={bus === currentBus ? "bus-button active" : "bus-button"}
+                onClick={() => setCurrentBus(bus)}
+                disabled={controlsDisabled}
+              >
+                BUS {bus}
+              </button>
+            ))}
           </section>
         )}
-
-        {error && <p className="error">{error}</p>}
 
         <section className={`channels ${controlsDisabled ? "disabled" : ""}`}>
           {channels.map((channelData) => {
             const volumePercent = Math.round(channelData.volume * 100);
-            const panPercent = Math.round(((channelData.pan + 1) / 2) * 100);
 
             return (
               <article className="channel-card fader-card" key={channelData.channel}>
@@ -540,17 +612,9 @@ function MixView() {
                   onTouchEnd={flushOnRelease}
                 />
 
-                <div className="pan-row">
-                  <label className="field-label" htmlFor={`pan-${channelData.channel}`}>
-                    Pan ({channelData.pan.toFixed(2)})
-                  </label>
-                  <div className="pan-hints">
-                    <span>L</span>
-                    <span>C</span>
-                    <span>R</span>
-                  </div>
-                </div>
-
+                <label className="field-label" htmlFor={`pan-${channelData.channel}`}>
+                  Pan
+                </label>
                 <input
                   id={`pan-${channelData.channel}`}
                   className="fader-input"
@@ -559,11 +623,8 @@ function MixView() {
                   max={1}
                   step={0.01}
                   value={channelData.pan}
-                  style={sliderStyle(panPercent)}
                   disabled={controlsDisabled}
                   onChange={(event) => onPanInput(channelData.channel, Number(event.target.value))}
-                  onMouseUp={flushOnRelease}
-                  onTouchEnd={flushOnRelease}
                 />
 
                 <button
@@ -572,7 +633,7 @@ function MixView() {
                   className={channelData.mute === 1 ? "mute active" : "mute"}
                   onClick={() => sendMute(channelData.channel, channelData.mute === 1 ? 0 : 1)}
                 >
-                  {channelData.mute === 1 ? "Mutado" : "Aberto"}
+                  {channelData.mute === 1 ? "Desmutar" : "Mutar"}
                 </button>
               </article>
             );

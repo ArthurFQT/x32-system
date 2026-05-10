@@ -186,7 +186,8 @@ x-admin-key: SUA_CHAVE
 - Sem confianca no frontend
 - Rejeicao de canais fora de `allowedChannels`
 - BUS travado no backend (cliente nao escolhe BUS livremente)
-- Clamp de volume/pan/mute
+- Musico controla somente volume e mute/unmute; pan e rejeitado no backend
+- Clamp de volume/mute
 - Cleanup periodico de tokens expirados
 
 ## Observacao sobre mute e X32 `/on`
