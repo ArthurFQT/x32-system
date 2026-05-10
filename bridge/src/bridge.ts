@@ -1,9 +1,9 @@
 ﻿import dgram from "dgram";
-import dotenv from "dotenv";
 import { io } from "socket.io-client";
+import { loadEnvironment } from "./env";
 import { decodeOscMessage, encodeOscMessage } from "./osc";
 
-dotenv.config();
+const RUNTIME_ENV = loadEnvironment();
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:3000";
 const BRIDGE_SECRET = process.env.BRIDGE_SECRET ?? "";
@@ -47,6 +47,35 @@ type BridgeIoOptionsResponse =
   | {
       ok: true;
       options: BridgeIoOptions;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+type BridgeControlStateRequest = {
+  buses?: number[];
+  channels?: number[];
+};
+
+type BridgeChannelControlState = {
+  channel: number;
+  volume?: number;
+  pan?: number;
+  mute?: 0 | 1;
+};
+
+type BridgeControlState = {
+  source: "mock" | "real" | "fallback";
+  controlsByBus: Record<number, BridgeChannelControlState[]>;
+  fetchedAt: number;
+  error?: string;
+};
+
+type BridgeControlStateResponse =
+  | {
+      ok: true;
+      state: BridgeControlState;
     }
   | {
       ok: false;
@@ -124,9 +153,12 @@ function toX32Osc(event: X32Event): {
   value: number;
   argType: "f" | "i";
 } {
+  const channel = pad2(event.channel);
+  const bus = pad2(event.bus);
+
   if (event.param === "volume") {
     return {
-      path: `/ch/${event.channel}/mix/${event.bus}/level`,
+      path: `/ch/${channel}/mix/${bus}/level`,
       value: clamp(event.value, 0, 1),
       argType: "f",
     };
@@ -134,7 +166,7 @@ function toX32Osc(event: X32Event): {
 
   if (event.param === "pan") {
     return {
-      path: `/ch/${event.channel}/mix/${event.bus}/pan`,
+      path: `/ch/${channel}/mix/${bus}/pan`,
       value: clamp(event.value, -1, 1),
       argType: "f",
     };
@@ -148,7 +180,7 @@ function toX32Osc(event: X32Event): {
   const onValue = mute === 1 ? 0 : 1;
 
   return {
-    path: `/ch/${event.channel}/mix/${event.bus}/on`,
+    path: `/ch/${channel}/mix/${bus}/on`,
     value: onValue,
     argType: "i",
   };
@@ -192,6 +224,156 @@ function queryOscString(address: string): Promise<string | undefined> {
       }
     });
   });
+}
+
+function queryOscNumber(address: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    let finished = false;
+
+    const finish = (result?: number) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      udpClient.off("message", onMessage);
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const onMessage = (packet: Buffer) => {
+      try {
+        const decoded = decodeOscMessage(packet);
+        if (decoded.address !== address) {
+          return;
+        }
+
+        const numberArg = decoded.args.find((arg): arg is number => typeof arg === "number");
+        finish(numberArg);
+      } catch {
+        // Ignora mensagens OSC nao relacionadas.
+      }
+    };
+
+    const timer = setTimeout(() => finish(undefined), X32_QUERY_TIMEOUT_MS);
+    udpClient.on("message", onMessage);
+
+    const requestPacket = encodeOscMessage(address, []);
+    udpClient.send(requestPacket, X32_PORT, X32_IP, (error) => {
+      if (error) {
+        finish(undefined);
+      }
+    });
+  });
+}
+
+function sanitizeIds(values: number[] | undefined, min: number, max: number): number[] {
+  const unique = new Set<number>();
+
+  for (const value of values ?? []) {
+    if (Number.isInteger(value) && value >= min && value <= max) {
+      unique.add(value);
+    }
+  }
+
+  return Array.from(unique).sort((a, b) => a - b);
+}
+
+function buildMockControlState(buses: number[], channels: number[]): BridgeControlState {
+  const controlsByBus = buses.reduce<Record<number, BridgeChannelControlState[]>>((acc, bus) => {
+    acc[bus] = channels.map((channel) => ({
+      channel,
+      volume: 0.75,
+      pan: 0,
+      mute: 0,
+    }));
+    return acc;
+  }, {});
+
+  return {
+    source: "mock",
+    controlsByBus,
+    fetchedAt: Date.now(),
+  };
+}
+
+async function queryChannelControlState(
+  bus: number,
+  channel: number,
+): Promise<BridgeChannelControlState> {
+  const channelPath = pad2(channel);
+  const busPath = pad2(bus);
+  const [volume, pan, onValue] = await Promise.all([
+    queryOscNumber(`/ch/${channelPath}/mix/${busPath}/level`),
+    queryOscNumber(`/ch/${channelPath}/mix/${busPath}/pan`),
+    queryOscNumber(`/ch/${channelPath}/mix/${busPath}/on`),
+  ]);
+
+  const control: BridgeChannelControlState = { channel };
+
+  if (typeof volume === "number" && Number.isFinite(volume)) {
+    control.volume = clamp(volume, 0, 1);
+  }
+
+  if (typeof pan === "number" && Number.isFinite(pan)) {
+    control.pan = clamp(pan, -1, 1);
+  }
+
+  if (typeof onValue === "number" && Number.isFinite(onValue)) {
+    control.mute = onValue >= 0.5 ? 0 : 1;
+  }
+
+  return control;
+}
+
+async function queryRealControlState(buses: number[], channels: number[]): Promise<BridgeControlState> {
+  const controlsByBus: Record<number, BridgeChannelControlState[]> = {};
+  let readCount = 0;
+
+  for (const bus of buses) {
+    controlsByBus[bus] = [];
+
+    for (const channel of channels) {
+      const control = await queryChannelControlState(bus, channel);
+      if (
+        control.volume !== undefined ||
+        control.pan !== undefined ||
+        control.mute !== undefined
+      ) {
+        readCount += 1;
+      }
+      controlsByBus[bus].push(control);
+    }
+  }
+
+  if (readCount === 0) {
+    return {
+      source: "fallback",
+      controlsByBus,
+      fetchedAt: Date.now(),
+      error: "Nao foi possivel ler valores reais da X32.",
+    };
+  }
+
+  return {
+    source: "real",
+    controlsByBus,
+    fetchedAt: Date.now(),
+  };
+}
+
+async function getControlState(payload: BridgeControlStateRequest): Promise<BridgeControlState> {
+  const buses = sanitizeIds(payload.buses, 1, 16);
+  const channels = sanitizeIds(payload.channels, 1, 32);
+
+  if (buses.length === 0 || channels.length === 0) {
+    throw new Error("BUS_OR_CHANNELS_INVALID");
+  }
+
+  if (!USE_REAL_X32_IO) {
+    return buildMockControlState(buses, channels);
+  }
+
+  return queryRealControlState(buses, channels);
 }
 
 async function queryRealIoOptions(): Promise<BridgeIoOptions> {
@@ -378,7 +560,7 @@ function connectBackend() {
 
   socket.on("connect", () => {
     const transport = socket.io.engine.transport.name;
-    console.log(`[BRIDGE] conectado ao backend (${BACKEND_URL}) via ${transport}`);
+    console.log(`[BRIDGE] conectado ao backend (${BACKEND_URL}) via ${transport} env=${RUNTIME_ENV}`);
   });
 
   socket.io.engine.on("upgrade", (transport) => {
@@ -408,6 +590,25 @@ function connectBackend() {
       callback({
         ok: false,
         error: error instanceof Error ? error.message : "BRIDGE_IO_OPTIONS_FAILED",
+      });
+    }
+  });
+
+  socket.on("bridge:get-control-state", async (payload: BridgeControlStateRequest, callback?: (response: BridgeControlStateResponse) => void) => {
+    if (typeof callback !== "function") {
+      return;
+    }
+
+    try {
+      const state = await getControlState(payload ?? {});
+      callback({
+        ok: true,
+        state,
+      });
+    } catch (error) {
+      callback({
+        ok: false,
+        error: error instanceof Error ? error.message : "BRIDGE_CONTROL_STATE_FAILED",
       });
     }
   });
