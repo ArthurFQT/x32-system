@@ -1,10 +1,10 @@
 ﻿import cors from "cors";
-import dotenv from "dotenv";
 import express, { NextFunction, Request, Response } from "express";
 import http from "http";
 import QRCode from "qrcode";
 import { Server, Socket } from "socket.io";
 import { v4 as uuidv4 } from "uuid";
+import { loadEnvironment } from "./env";
 import { listLogs, logAction } from "./logger";
 import {
   cleanupTokens,
@@ -31,7 +31,7 @@ import {
   parseUpdateTokenPayload,
 } from "./validation";
 
-dotenv.config();
+const RUNTIME_ENV = loadEnvironment();
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -41,6 +41,10 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY ?? "";
 const USE_REAL_X32_IO = (process.env.USE_REAL_X32_IO ?? "false").toLowerCase() === "true";
 const BRIDGE_IO_REQUEST_TIMEOUT_MS = parseInt(
   process.env.BRIDGE_IO_REQUEST_TIMEOUT_MS ?? "10000",
+  10,
+);
+const BRIDGE_CONTROL_STATE_TIMEOUT_MS = parseInt(
+  process.env.BRIDGE_CONTROL_STATE_TIMEOUT_MS ?? "15000",
   10,
 );
 const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_MS ?? "10000", 10);
@@ -92,6 +96,30 @@ type BridgeIoOptionsResponse =
   | {
       ok: true;
       options: IoOptionsPayload;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+type BridgeChannelControlState = {
+  channel: number;
+  volume?: number;
+  pan?: number;
+  mute?: 0 | 1;
+};
+
+type BridgeControlStatePayload = {
+  source: "mock" | "real" | "fallback";
+  controlsByBus: Record<number, BridgeChannelControlState[]>;
+  fetchedAt: number;
+  error?: string;
+};
+
+type BridgeControlStateResponse =
+  | {
+      ok: true;
+      state: BridgeControlStatePayload;
     }
   | {
       ok: false;
@@ -155,14 +183,7 @@ async function buildQrCodeDataUrl(
 
 function toPublicToken(token: TokenRecord, accessBaseUrl = resolveAccessBaseUrl()) {
   const status = getTokenStatus(token);
-  const controlsByBus = token.bus.reduce<Record<number, ChannelControl[]>>((acc, bus) => {
-    const busControls = token.controlsByBus[bus] ?? {};
-    acc[bus] = token.allowedChannels.map((channel) => ({
-      channel,
-      ...(busControls[channel] ?? { volume: 0.75, pan: 0, mute: 0 }),
-    }));
-    return acc;
-  }, {});
+  const controlsByBus = buildControlsByBusSnapshot(token);
 
   return {
     id: token.id,
@@ -177,6 +198,17 @@ function toPublicToken(token: TokenRecord, accessBaseUrl = resolveAccessBaseUrl(
     accessUrl: buildAccessUrl(token.id, accessBaseUrl),
     controlsByBus,
   };
+}
+
+function buildControlsByBusSnapshot(token: TokenRecord): Record<number, ChannelControl[]> {
+  return token.bus.reduce<Record<number, ChannelControl[]>>((acc, bus) => {
+    const busControls = token.controlsByBus[bus] ?? {};
+    acc[bus] = token.allowedChannels.map((channel) => ({
+      channel,
+      ...(busControls[channel] ?? { volume: 0.75, pan: 0, mute: 0 }),
+    }));
+    return acc;
+  }, {});
 }
 
 function buildMockIoOptions(): IoOptionsPayload {
@@ -233,6 +265,39 @@ function requestBridgeIoOptions(forceRefresh: boolean): Promise<IoOptionsPayload
           }
 
           resolve(response.options);
+        },
+      );
+  });
+}
+
+function requestBridgeControlState(token: TokenRecord): Promise<BridgeControlStatePayload> {
+  return new Promise((resolve, reject) => {
+    const bridgeSocket = getFirstBridgeSocket();
+    if (!bridgeSocket) {
+      reject(new Error("BRIDGE_NOT_CONNECTED"));
+      return;
+    }
+
+    bridgeSocket
+      .timeout(BRIDGE_CONTROL_STATE_TIMEOUT_MS)
+      .emit(
+        "bridge:get-control-state",
+        {
+          buses: token.bus,
+          channels: token.allowedChannels,
+        },
+        (error: Error | null, response: BridgeControlStateResponse) => {
+          if (error) {
+            reject(new Error("BRIDGE_CONTROL_STATE_TIMEOUT"));
+            return;
+          }
+
+          if (!response || response.ok !== true) {
+            reject(new Error(response?.error ?? "BRIDGE_CONTROL_STATE_FAILED"));
+            return;
+          }
+
+          resolve(response.state);
         },
       );
   });
@@ -383,6 +448,71 @@ function buildControlAck(token: TokenRecord, bus: number, channel: number): Cont
   };
 }
 
+function applyBridgeControlState(token: TokenRecord, state: BridgeControlStatePayload): number {
+  let updatedCount = 0;
+
+  for (const bus of token.bus) {
+    const busControls = token.controlsByBus[bus];
+    const incomingControls = state.controlsByBus[bus] ?? [];
+    if (!busControls || incomingControls.length === 0) {
+      continue;
+    }
+
+    for (const incomingControl of incomingControls) {
+      if (!token.allowedChannels.includes(incomingControl.channel)) {
+        continue;
+      }
+
+      const channelControl = busControls[incomingControl.channel];
+      if (!channelControl) {
+        continue;
+      }
+
+      if (typeof incomingControl.volume === "number" && Number.isFinite(incomingControl.volume)) {
+        channelControl.volume = clampVolume(incomingControl.volume);
+        updatedCount += 1;
+      }
+
+      if (typeof incomingControl.pan === "number" && Number.isFinite(incomingControl.pan)) {
+        channelControl.pan = clampPan(incomingControl.pan);
+        updatedCount += 1;
+      }
+
+      if (incomingControl.mute === 0 || incomingControl.mute === 1) {
+        channelControl.mute = incomingControl.mute;
+        updatedCount += 1;
+      }
+    }
+  }
+
+  return updatedCount;
+}
+
+async function syncTokenControlsFromBridge(token: TokenRecord): Promise<void> {
+  if (!bridgeConnected()) {
+    return;
+  }
+
+  try {
+    const state = await requestBridgeControlState(token);
+    const updatedCount = applyBridgeControlState(token, state);
+
+    logAction("CONTROL_STATE_SYNCED", {
+      token: token.id,
+      user: token.user,
+      source: state.source,
+      updatedCount,
+      error: state.error,
+    });
+  } catch (error) {
+    logAction("CONTROL_STATE_SYNC_FAILED", {
+      token: token.id,
+      user: token.user,
+      error: error instanceof Error ? error.message : "BRIDGE_CONTROL_STATE_FAILED",
+    });
+  }
+}
+
 function handleControl(
   socket: Socket,
   type: ControlType,
@@ -404,12 +534,17 @@ function handleControl(
 
   const token = validation.token;
 
+  if (!bridgeConnected()) {
+    callback?.({ ok: false, error: "BRIDGE_NOT_CONNECTED" });
+    return;
+  }
+
   try {
     const payload = parseControlPayload(rawPayload);
 
-    const bus = payload.bus ?? token.bus[0];
+    const bus = payload.bus !== undefined ? payload.bus : token.bus[0];
     if (!token.bus.includes(bus)) {
-      callback?.({ ok: false, error: "BUS_NOT_ALLOWED" });
+      callback?.({ ok: false, error: "BUS_LOCKED_TO_TOKEN" });
       return;
     }
 
@@ -511,6 +646,7 @@ function getOverview() {
   }
 
   return {
+    environment: RUNTIME_ENV,
     now,
     bridgeConnected: bridgeConnected(),
     connectedMusicians: connectedMusicianCount(),
@@ -838,6 +974,60 @@ io.use((socket, next) => {
   next(new Error("ROLE_INVALID"));
 });
 
+async function handleMusicianConnection(socket: Socket): Promise<void> {
+  const tokenId = String(socket.data.tokenId ?? "");
+  let validation = validateTokenNow(tokenId);
+  if (!validation.ok) {
+    socket.emit("session:blocked", { reason: validation.blockedReason ?? "revoked" });
+    socket.disconnect(true);
+    return;
+  }
+
+  let token = validation.token;
+  socket.join(tokenRoom(token.id));
+
+  await syncTokenControlsFromBridge(token);
+
+  if (!socket.connected) {
+    return;
+  }
+
+  validation = validateTokenNow(token.id);
+  if (!validation.ok) {
+    socket.emit("session:blocked", { reason: validation.blockedReason ?? "revoked" });
+    socket.disconnect(true);
+    return;
+  }
+
+  token = validation.token;
+  const sessionBus = token.bus[0];
+  const controlsByBus = buildControlsByBusSnapshot(token);
+
+  socket.emit("session:init", {
+    token: token.id,
+    user: token.user,
+    bus: sessionBus,
+    buses: token.bus,
+    allowedChannels: token.allowedChannels,
+    enabled: token.enabled,
+    expiresAt: token.expiresAt,
+    bridgeConnected: bridgeConnected(),
+    controlsByBus,
+  });
+
+  socket.on("control:volume", (payload, callback?: (ack: ControlAck) => void) => {
+    handleControl(socket, "volume", payload, callback);
+  });
+
+  socket.on("control:pan", (payload, callback?: (ack: ControlAck) => void) => {
+    handleControl(socket, "pan", payload, callback);
+  });
+
+  socket.on("control:mute", (payload, callback?: (ack: ControlAck) => void) => {
+    handleControl(socket, "mute", payload, callback);
+  });
+}
+
 io.on("connection", (socket) => {
   const role = String(socket.data.role ?? "");
 
@@ -852,46 +1042,13 @@ io.on("connection", (socket) => {
     return;
   }
 
-  const tokenId = String(socket.data.tokenId ?? "");
-  const validation = validateTokenNow(tokenId);
-  if (!validation.ok) {
-    socket.emit("session:blocked", { reason: validation.blockedReason ?? "revoked" });
+  void handleMusicianConnection(socket).catch((error) => {
+    logAction("MUSICIAN_CONNECTION_FAILED", {
+      socketId: socket.id,
+      error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
+    });
+    socket.emit("session:blocked", { reason: "revoked" });
     socket.disconnect(true);
-    return;
-  }
-
-  const token = validation.token;
-  socket.join(tokenRoom(token.id));
-
-  socket.emit("session:init", {
-    token: token.id,
-    user: token.user,
-    bus: token.bus[0],
-    buses: token.bus,
-    allowedChannels: token.allowedChannels,
-    enabled: token.enabled,
-    expiresAt: token.expiresAt,
-    bridgeConnected: bridgeConnected(),
-    controlsByBus: token.bus.reduce<Record<number, ChannelControl[]>>((acc, bus) => {
-      const busControls = token.controlsByBus[bus] ?? {};
-      acc[bus] = token.allowedChannels.map((channel) => ({
-        channel,
-        ...(busControls[channel] ?? { volume: 0.75, pan: 0, mute: 0 }),
-      }));
-      return acc;
-    }, {}),
-  });
-
-  socket.on("control:volume", (payload, callback?: (ack: ControlAck) => void) => {
-    handleControl(socket, "volume", payload, callback);
-  });
-
-  socket.on("control:pan", (payload, callback?: (ack: ControlAck) => void) => {
-    handleControl(socket, "pan", payload, callback);
-  });
-
-  socket.on("control:mute", (payload, callback?: (ack: ControlAck) => void) => {
-    handleControl(socket, "mute", payload, callback);
   });
 });
 

@@ -20,6 +20,50 @@ Fluxo:
   - bridge e backend
   - bridge e X32 (UDP porta 10023)
 
+## Ambientes `dev` e `prod`
+
+Cada parte do sistema agora tem exemplos separados:
+
+- `server/.env.dev.example` e `server/.env.prod.example`
+- `bridge/.env.dev.example` e `bridge/.env.prod.example`
+- `web/.env.dev.example` e `web/.env.prod.example`
+
+Crie os arquivos reais a partir dos exemplos:
+
+```bash
+cp server/.env.dev.example server/.env.dev
+cp bridge/.env.dev.example bridge/.env.dev
+cp web/.env.dev.example web/.env.dev
+
+cp server/.env.prod.example server/.env.prod
+cp bridge/.env.prod.example bridge/.env.prod
+cp web/.env.prod.example web/.env.prod
+```
+
+Os arquivos reais `.env`, `.env.dev` e `.env.prod` ficam fora do git. Os exemplos podem ser versionados.
+
+Ordem de carregamento:
+
+1. variaveis ja definidas pelo sistema/hospedagem
+2. `.env.dev` ou `.env.prod`
+3. `.env` como fallback de compatibilidade
+
+Scripts principais:
+
+```bash
+# desenvolvimento
+cd server && npm run dev
+cd bridge && npm run dev
+cd web && npm run dev
+
+# build/producao
+cd server && npm run build && npm run start:prod
+cd bridge && npm run build && npm run start:prod
+cd web && npm run build:prod
+```
+
+No backend e na bridge, `X32_ENV=dev` carrega `.env.dev` e `X32_ENV=prod` carrega `.env.prod`. Os scripts ja definem isso automaticamente. No frontend, o Vite usa `--mode dev` e `--mode prod`.
+
 ## Modo rede local
 
 Para usar pelo celular/tablet na mesma rede, use o IP do computador que roda o
@@ -31,10 +75,10 @@ Get-NetIPAddress -AddressFamily IPv4
 
 Exemplo com `192.168.0.13`:
 
-- `server/.env`: `HOST=0.0.0.0`, `ACCESS_BASE_URL=http://192.168.0.13:5173`
-- `server/.env`: `CORS_ORIGIN=http://localhost:5173,http://127.0.0.1:5173,http://192.168.0.13:5173`
-- `web/.env`: `VITE_SERVER_URL=http://192.168.0.13:3000`
-- `bridge/.env`: `BACKEND_URL=http://192.168.0.13:3000`
+- `server/.env.dev`: `HOST=0.0.0.0`, `ACCESS_BASE_URL=http://192.168.0.13:5173`
+- `server/.env.dev`: `CORS_ORIGIN=http://localhost:5173,http://127.0.0.1:5173,http://192.168.0.13:5173`
+- `web/.env.dev`: `VITE_SERVER_URL=http://192.168.0.13:3000`
+- `bridge/.env.dev`: `BACKEND_URL=http://192.168.0.13:3000`
 
 Depois rode `server`, `web` e `bridge` normalmente. Abra no outro dispositivo:
 
@@ -42,16 +86,16 @@ Depois rode `server`, `web` e `bridge` normalmente. Abra no outro dispositivo:
 http://192.168.0.13:5173/admin
 ```
 
-Se o IP da maquina mudar, atualize esses tres `.env`.
+Se o IP da maquina mudar, atualize esses tres `.env.dev`.
 
 ## 1) Backend (`server/`)
 
 ### Variaveis de ambiente
 
-Copie:
+Para desenvolvimento, copie:
 
 ```bash
-cp .env.example .env
+cp .env.dev.example .env.dev
 ```
 
 Campos principais:
@@ -63,6 +107,7 @@ Campos principais:
 - `ADMIN_API_KEY`: chave para proteger endpoints admin (opcional, mas recomendado)
 - `USE_REAL_X32_IO`: `true` para buscar BUS/canais reais via bridge, `false` para exemplos
 - `BRIDGE_IO_REQUEST_TIMEOUT_MS`: timeout da consulta de IO na bridge
+- `BRIDGE_CONTROL_STATE_TIMEOUT_MS`: timeout para ler volume/pan/mute atuais via bridge
 - `TOKEN_RETENTION_MINUTES`: tempo para manter token inativo antes de remover
 - `CLEANUP_INTERVAL_MS`: intervalo de verificacao de expiracao
 
@@ -77,10 +122,10 @@ npm run dev
 
 ### Variaveis de ambiente
 
-Copie:
+Para desenvolvimento, copie:
 
 ```bash
-cp .env.example .env
+cp .env.dev.example .env.dev
 ```
 
 Campos principais:
@@ -104,10 +149,10 @@ npm run dev
 
 ### Variaveis de ambiente
 
-Copie:
+Para desenvolvimento, copie:
 
 ```bash
-cp .env.example .env
+cp .env.dev.example .env.dev
 ```
 
 Campo principal:
@@ -186,7 +231,8 @@ x-admin-key: SUA_CHAVE
 - Sem confianca no frontend
 - Rejeicao de canais fora de `allowedChannels`
 - BUS travado no backend (cliente nao escolhe BUS livremente)
-- Clamp de volume/pan/mute
+- Musico controla somente volume e mute/unmute; pan e rejeitado no backend
+- Clamp de volume/mute
 - Cleanup periodico de tokens expirados
 
 ## Observacao sobre mute e X32 `/on`
@@ -203,6 +249,16 @@ Na bridge, isso e convertido para `/on` da X32:
 
 Assim a semantica fica consistente para o musico e para o OSC da X32.
 
+## Leitura inicial dos controles da X32
+
+Quando a tela `/mix?token=...` abre, o backend pede para a bridge ler os valores atuais dos BUS/canais autorizados no token. A bridge consulta:
+
+- `/ch/XX/mix/YY/level`
+- `/ch/XX/mix/YY/pan`
+- `/ch/XX/mix/YY/on`
+
+Para isso funcionar com a mesa real, deixe `USE_REAL_X32_IO=true` na bridge. Se estiver `false`, a bridge devolve valores mock para desenvolvimento.
+
 ## Publicacao no GitHub
 
 Este repositorio agora esta preparado para subir sem arquivos sensiveis e sem artefatos locais.
@@ -212,13 +268,14 @@ O que fica fora do git:
 - `**/node_modules`
 - `**/dist`
 - `**/.env`
+- `**/.env.*`, exceto exemplos `.env.dev.example` e `.env.prod.example`
 
 Checklist antes do push:
 
 1. Confira se nao ha segredo versionado:
 
 ```bash
-git ls-files "*.env"
+git ls-files "*/.env" "*/.env.dev" "*/.env.prod"
 ```
 
 O comando acima deve retornar vazio.
@@ -296,7 +353,7 @@ Teste:
 
 No computador local (rede da mesa):
 
-1. Configure `bridge/.env`:
+1. Configure `bridge/.env.prod`:
    - `BACKEND_URL=https://SEU_BACKEND_RENDER`
    - `BRIDGE_SECRET` igual ao backend
    - `X32_IP` da mesa
