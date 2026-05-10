@@ -73,9 +73,6 @@ export function formatLogMessage(entry: LogEntry): string {
     case "CONTROL_STATE_SYNCED":
       return `${time} • O estado da mesa foi sincronizado com sucesso.`;
 
-    case "CONTROL_STATE_SYNCED":
-      return `${time} • O usuário "${entry.user}" sincronizou o estado da mesa.`;
-
     default:
       return `${time} • ${entry.action}`;
   }
