@@ -78,6 +78,11 @@ export type TokensResponse = {
 export type LogEntry = {
   timestamp: string;
   action: string;
+
+  id?: string | number;
+  user?: string;
+  message?: string;
+
   [key: string]: unknown;
 };
 

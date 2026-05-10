@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { busToString, formatDateTime } from "@/lib/format";
+import { busToString, formatDateTime, formatLogMessage } from "@/lib/format";
 import { parseError } from "@/lib/api/http";
 import { SERVER_URL } from "@/lib/env";
 import type {
@@ -432,7 +432,7 @@ export function AdminPage() {
           <LogsContainer>
             {logs.map((entry, idx) => (
               <pre key={`${entry.timestamp}-${entry.action}-${idx}`}>
-                {JSON.stringify(entry)}
+                {formatLogMessage(entry)}
               </pre>
             ))}
           </LogsContainer>

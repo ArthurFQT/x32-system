@@ -144,25 +144,11 @@ export const RowActions = styled(FlexRow)`
   flex-wrap: wrap;
 `;
 
-// ── Logs ──────────────────────────────────────────────────
-// ScrollContainer cobre border, radius, bg e overflow; só ajustamos padding e pre
 export const LogsContainer = styled(ScrollContainer)`
   max-height: 500px;
   display: flex;
   flex-direction: column;
   gap: ${theme.spacing.md};
-
-  pre {
-    margin: 0;
-    padding: ${theme.spacing.md};
-    background: ${theme.colors.bg.secondary};
-    border: 1px solid ${theme.colors.border.primary};
-    border-radius: ${theme.borderRadius.sm};
-    font-size: ${theme.typography.fontSize.xs};
-    color: ${theme.colors.text.muted};
-    overflow-x: auto;
-    line-height: 1.4;
-  }
 `;
 
 // ── Option Grid ───────────────────────────────────────────
