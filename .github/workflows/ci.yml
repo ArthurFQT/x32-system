@@ -21,30 +21,30 @@ jobs:
           node-version: 20
           cache: yarn
           cache-dependency-path: |
-            server/package-lock.json
-            bridge/package-lock.json
-            web/package-lock.json
+            server/yarn.lock
+            bridge/yarn.lock
+            web/yarn.lock
 
       - name: Install server deps
-        run: yarn ci
+        run: yarn install --frozen-lockfile
         working-directory: server
 
       - name: Build server
-        run: yarn run build
+        run: yarn build
         working-directory: server
 
       - name: Install bridge deps
-        run: yarn ci
+        run: yarn install --frozen-lockfile
         working-directory: bridge
 
       - name: Build bridge
-        run: yarn run build
+        run: yarn build
         working-directory: bridge
 
       - name: Install web deps
-        run: yarn ci
+        run: yarn install --frozen-lockfile
         working-directory: web
 
       - name: Build web
-        run: yarn run build
+        run: yarn build
         working-directory: web
