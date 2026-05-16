@@ -32,6 +32,12 @@ jobs:
       - name: Build server
         run: yarn build
         working-directory: server
+        env:
+          PORT: ${{ secrets.PORT }}
+          HOST: ${{ secrets.HOST }}
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+          ACCESS_BASE_URL: ${{ secrets.ACCESS_BASE_URL }}
+          BRIDGE_SECRET: ${{ secrets.BRIDGE_SECRET }}
 
       - name: Install bridge deps
         run: yarn install --frozen-lockfile
@@ -48,3 +54,5 @@ jobs:
       - name: Build web
         run: yarn build
         working-directory: web
+        env:
+          VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
