@@ -7,7 +7,7 @@
     "dev": "node ../scripts/run-env.cjs dev ts-node-dev --respawn --transpile-only src/bridge.ts",
     "dev:prod": "node ../scripts/run-env.cjs prod ts-node-dev --respawn --transpile-only src/bridge.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "npm run start:prod",
+    "start": "yarn run start:prod",
     "start:dev": "node ../scripts/run-env.cjs dev node dist/bridge.js",
     "start:prod": "node ../scripts/run-env.cjs prod node dist/bridge.js"
   },

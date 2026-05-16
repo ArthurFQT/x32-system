@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host --mode dev",
     "dev:prod": "vite --host --mode prod",
-    "build": "npm run build:prod",
+    "build": "yarn run build:prod",
     "build:dev": "tsc -b && vite build --mode dev",
     "build:prod": "tsc -b && vite build --mode prod",
     "preview": "vite preview --mode prod",
