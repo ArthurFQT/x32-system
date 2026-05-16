@@ -1,4 +1,4 @@
-import { ChannelControl, TokenRecord, TokenStatus } from "./types";
+import { ChannelControl, TokenRecord, TokenStatus } from "../../types";
 
 const tokens = new Map<string, TokenRecord>();
 

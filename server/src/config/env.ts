@@ -4,7 +4,9 @@ import path from "path";
 
 export type RuntimeEnv = "dev" | "prod";
 
-function normalizeRuntimeEnv(value: string | undefined): RuntimeEnv | undefined {
+function normalizeRuntimeEnv(
+  value: string | undefined,
+): RuntimeEnv | undefined {
   const normalized = value?.trim().toLowerCase();
 
   if (normalized === "dev" || normalized === "development") {
@@ -19,7 +21,7 @@ function normalizeRuntimeEnv(value: string | undefined): RuntimeEnv | undefined 
 }
 
 function detectDefaultRuntimeEnv(): RuntimeEnv {
-  const packageRoot = path.resolve(__dirname, "..");
+  const packageRoot = path.resolve(__dirname, "../..");
   const srcRoot = path.join(packageRoot, "src");
 
   return path.resolve(__dirname).startsWith(srcRoot) ? "dev" : "prod";
@@ -32,7 +34,7 @@ export function loadEnvironment(): RuntimeEnv {
     normalizeRuntimeEnv(process.env.NODE_ENV) ??
     detectDefaultRuntimeEnv();
 
-  const packageRoot = path.resolve(__dirname, "..");
+  const packageRoot = path.resolve(__dirname, "../..");
 
   for (const filename of [`.env.${runtimeEnv}`, ".env"]) {
     const envPath = path.join(packageRoot, filename);
