@@ -1,12 +1,13 @@
-import { ControlPayload } from "./types";
-
-const CHANNEL_MIN = 1;
-const CHANNEL_MAX = 32;
-const BUS_MIN = 1;
-const BUS_MAX = 16;
-const DURATION_MIN = 1;
-const DURATION_MAX = 24 * 60;
-const EXTEND_MAX = 7 * 24 * 60;
+import { ControlPayload } from "../../types";
+import {
+  BUS_MAX,
+  BUS_MIN,
+  CHANNEL_MAX,
+  CHANNEL_MIN,
+  DURATION_MAX,
+  DURATION_MIN,
+  EXTEND_MAX,
+} from "../../config/constants";
 
 function fail(message: string): never {
   throw new Error(message);
@@ -156,10 +157,8 @@ export function parseRevokePayload(payload: unknown): { token: string } {
     fail("Payload invalido.");
   }
 
-  const token = typeof (payload as Record<string, unknown>).token === "string"
-    ? ((payload as Record<string, unknown>).token as string).trim()
-    : "";
-
+  const data = payload as Record<string, unknown>;
+  const token = parseOptionalString(data.token, "token");
   if (!token) {
     fail("token e obrigatorio.");
   }
@@ -172,38 +171,28 @@ export function parseExtendPayload(payload: unknown): { minutes: number } {
     fail("Payload invalido.");
   }
 
-  const minutes = parseIntegerInRange(
-    (payload as Record<string, unknown>).minutes,
-    "minutes",
-    DURATION_MIN,
-    EXTEND_MAX,
-  );
+  const data = payload as Record<string, unknown>;
+  const minutes = parseIntegerInRange(data.minutes, "minutes", 1, EXTEND_MAX);
 
   return { minutes };
 }
 
 export function parseControlPayload(payload: unknown): ControlPayload {
   if (!payload || typeof payload !== "object") {
-    fail("Payload de controle invalido.");
+    fail("Payload invalido.");
   }
 
   const data = payload as Record<string, unknown>;
   const channel = parseIntegerInRange(data.channel, "channel", CHANNEL_MIN, CHANNEL_MAX);
-
-  if (typeof data.value !== "number" || !Number.isFinite(data.value)) {
+  const value = data.value;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     fail("value deve ser numerico.");
   }
 
-  let parsedBus: number | undefined;
-  if (data.bus !== undefined) {
-    parsedBus = parseIntegerInRange(data.bus, "bus", BUS_MIN, BUS_MAX);
-  }
+  const bus =
+    data.bus === undefined ? undefined : parseIntegerInRange(data.bus, "bus", BUS_MIN, BUS_MAX);
 
-  return {
-    channel,
-    value: data.value,
-    bus: parsedBus,
-  };
+  return { channel, value, bus };
 }
 
 export function clampVolume(value: number): number {
@@ -215,5 +204,5 @@ export function clampPan(value: number): number {
 }
 
 export function clampMute(value: number): 0 | 1 {
-  return value >= 0.5 ? 1 : 0;
+  return value === 0 ? 0 : 1;
 }
