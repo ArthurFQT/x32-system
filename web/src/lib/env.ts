@@ -7,6 +7,8 @@ function isLocalBackendUrl(url: string): boolean {
   }
 }
 
+const PROD_BACKEND_FALLBACK = "https://x32-system-1.onrender.com";
+
 function resolveServerUrl(): string {
   const configured = String(import.meta.env.VITE_SERVER_URL ?? "")
     .trim()
@@ -28,13 +30,19 @@ function resolveServerUrl(): string {
     return `${window.location.protocol}//${browserHost}:3000`;
   }
 
+  if (import.meta.env.PROD) {
+    return PROD_BACKEND_FALLBACK;
+  }
+
   return configured || "http://localhost:3000";
 }
 
 export const env = {
   VITE_SERVER_URL: resolveServerUrl(),
   VITE_ADMIN_KEY: String(import.meta.env.VITE_ADMIN_KEY ?? "").trim(),
+  VITE_SERVER_URL_CONFIGURED: String(import.meta.env.VITE_SERVER_URL ?? "").trim(),
 } as const;
 
 export const SERVER_URL = env.VITE_SERVER_URL;
 export const ADMIN_KEY = env.VITE_ADMIN_KEY;
+export const SERVER_URL_CONFIGURED = env.VITE_SERVER_URL_CONFIGURED;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { busToString, formatDateTime, formatLogMessage } from "@/lib/format";
-import { parseError } from "@/lib/api/http";
-import { SERVER_URL } from "@/lib/env";
+import { ADMIN_KEY, SERVER_URL, SERVER_URL_CONFIGURED } from "@/lib/env";
+import { fetchPublicHealth, fetchWithAdminKey } from "@/lib/admin-api";
 import { persistAdminKey, resolveInitialAdminKey } from "@/lib/admin-key";
 import type {
   AdminToken,
@@ -62,52 +62,71 @@ export function AdminPage() {
   } | null>(null);
 
   useEffect(() => {
+    if (ADMIN_KEY) {
+      setAdminKey(ADMIN_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
     persistAdminKey(adminKey);
   }, [adminKey]);
 
   const apiRequest = useCallback(
-    async <T,>(path: string, init?: RequestInit): Promise<T> => {
-      const headers = new Headers(init?.headers ?? {});
-      if (!headers.has("Content-Type") && init?.body !== undefined) {
-        headers.set("Content-Type", "application/json");
-      }
-      if (adminKey.trim()) headers.set("x-admin-key", adminKey.trim());
-      const response = await fetch(`${SERVER_URL}${path}`, {
-        ...init,
-        headers,
-      });
-      if (!response.ok) throw new Error(await parseError(response));
-      return (await response.json()) as T;
-    },
+    async <T,>(path: string, init?: RequestInit): Promise<T> =>
+      fetchWithAdminKey<T>(path, adminKey, init),
     [adminKey],
   );
 
   const refreshData = useCallback(
     async (refreshIo = false) => {
-      try {
-        const [overviewData, tokenData, logData, ioData] = await Promise.all([
-          apiRequest<OverviewResponse>("/admin/overview"),
-          apiRequest<TokensResponse>("/tokens"),
-          apiRequest<LogsResponse>("/admin/logs?limit=150"),
-          apiRequest<IoOptionsResponse>(
-            `/admin/io-options${refreshIo ? "?refresh=true" : ""}`,
-          ),
-        ]);
-        setOverview(overviewData);
-        setTokens(tokenData.tokens);
-        setLogs(logData.logs);
-        setIoOptions(ioData.options);
-        setIoMode(ioData.mode);
-        setError("");
-      } catch (fetchError) {
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "Falha ao carregar dados.",
-        );
+      const errors: string[] = [];
+
+      const healthOverview = await fetchPublicHealth();
+      if (healthOverview) {
+        setOverview(healthOverview);
+      } else {
+        errors.push(`Sem resposta de ${SERVER_URL}/health`);
       }
+
+      const loadAdmin = async <T,>(
+        path: string,
+        onSuccess: (data: T) => void,
+        label: string,
+      ) => {
+        try {
+          const data = await fetchWithAdminKey<T>(path, adminKey);
+          onSuccess(data);
+        } catch (fetchError) {
+          const message =
+            fetchError instanceof Error ? fetchError.message : "Falha na requisicao.";
+          errors.push(`${label}: ${message}`);
+        }
+      };
+
+      await loadAdmin<OverviewResponse>("/admin/overview", setOverview, "Overview");
+      await loadAdmin<TokensResponse>("/tokens", (data) => setTokens(data.tokens), "Tokens");
+      await loadAdmin<LogsResponse>(
+        "/admin/logs?limit=150",
+        (data) => setLogs(data.logs),
+        "Logs",
+      );
+      await loadAdmin<IoOptionsResponse>(
+        `/admin/io-options${refreshIo ? "?refresh=true" : ""}`,
+        (data) => {
+          setIoOptions(data.options);
+          setIoMode(data.mode);
+        },
+        "IO",
+      );
+
+      if (errors.length === 0) {
+        setError("");
+        return;
+      }
+
+      setError(errors.join(" | "));
     },
-    [apiRequest],
+    [adminKey],
   );
 
   useEffect(() => {
@@ -244,9 +263,26 @@ export function AdminPage() {
             type="password"
             value={adminKey}
             onChange={(e) => setAdminKey(e.target.value)}
-            placeholder="x-admin-key"
+            placeholder={ADMIN_KEY ? "definida no build" : "igual ao ADMIN_API_KEY do Render"}
           />
         </div>
+
+        {import.meta.env.PROD && !ADMIN_KEY && (
+          <AlertMessage type="error">
+            Build sem VITE_ADMIN_KEY na Vercel. Defina igual ao ADMIN_API_KEY do Render e
+            redeploy.
+          </AlertMessage>
+        )}
+
+        {import.meta.env.PROD && !SERVER_URL_CONFIGURED && (
+          <AlertMessage type="error">
+            Build sem VITE_SERVER_URL; usando fallback {SERVER_URL}.
+          </AlertMessage>
+        )}
+
+        <p style={{ fontSize: "0.85rem", color: theme.colors.text.muted }}>
+          API: {SERVER_URL}
+        </p>
 
         {error && <AlertMessage type="error">{error}</AlertMessage>}
 
