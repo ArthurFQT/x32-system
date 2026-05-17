@@ -4,11 +4,11 @@ import http from "http";
 import { Server, Socket } from "socket.io";
 
 // Config
-import { loadEnvironment } from "./config/env";
 import {
   PORT,
   HOST,
   CORS_ORIGIN,
+  ADMIN_API_KEY,
   CLEANUP_INTERVAL_MS,
   TOKEN_RETENTION_MINUTES,
 } from "./config/constants";
@@ -36,8 +36,6 @@ import { cleanupTokens } from "./modules/token/store";
 // ============================================================================
 // Setup
 // ============================================================================
-
-loadEnvironment();
 
 const allowedCorsOrigins =
   CORS_ORIGIN === "*"
@@ -67,12 +65,40 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// ============================================================================
 // Admin Routes
-app.get("/admin/overview", (req, res) => {
+// ============================================================================
+
+function requireAdminKey(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  if (!ADMIN_API_KEY) {
+    // No admin key configured, allow access
+    next();
+    return;
+  }
+
+  const adminKey = req.header("x-admin-key") ?? "";
+  if (adminKey !== ADMIN_API_KEY) {
+    logAction("ADMIN_AUTH_FAILED", {
+      ip: req.ip,
+      path: req.path,
+      method: req.method,
+    });
+    res.status(401).json({ error: "ADMIN_UNAUTHORIZED" });
+    return;
+  }
+
+  next();
+}
+
+app.get("/admin/overview", requireAdminKey, (req, res) => {
   res.json(getOverview());
 });
 
-app.get("/admin/io-options", async (req, res) => {
+app.get("/admin/io-options", requireAdminKey, async (req, res) => {
   const { USE_REAL_X32_IO } = await import("./config/constants");
 
   const forceRefresh =
@@ -102,7 +128,7 @@ app.get("/admin/io-options", async (req, res) => {
   }
 });
 
-app.get("/admin/logs", (req, res) => {
+app.get("/admin/logs", requireAdminKey, (req, res) => {
   const rawLimit = Number(req.query.limit ?? 200);
   const limit = Number.isFinite(rawLimit)
     ? Math.max(1, Math.min(1000, Math.floor(rawLimit)))

@@ -649,6 +649,22 @@ connectBackend();
 udpClient.bind(() => {
   const address = udpClient.address();
   console.log(`[BRIDGE] UDP socket local em ${(typeof address === "string" ? address : address.port)}`);
+
+  if (!USE_REAL_X32_IO) {
+    console.log("[BRIDGE] X32 em modo simulado (USE_REAL_X32_IO=false)");
+    return;
+  }
+
+  void queryOscString("/ch/01/config/name").then((name) => {
+    if (name) {
+      console.log(`[BRIDGE] X32 conectada em ${X32_IP}:${X32_PORT} (ex.: canal 1 = "${name}")`);
+      return;
+    }
+
+    console.warn(
+      `[BRIDGE] X32 sem resposta em ${X32_IP}:${X32_PORT}. Verifique IP, rede e firewall UDP.`,
+    );
+  });
 });
 
 udpClient.on("error", (error) => {
