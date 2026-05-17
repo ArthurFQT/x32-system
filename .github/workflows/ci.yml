@@ -56,3 +56,4 @@ jobs:
         working-directory: web
         env:
           VITE_SERVER_URL: ${{ secrets.VITE_SERVER_URL }}
+          VITE_ADMIN_KEY: ${{ secrets.VITE_ADMIN_KEY }}

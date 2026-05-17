@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { busToString, formatDateTime, formatLogMessage } from "@/lib/format";
 import { parseError } from "@/lib/api/http";
 import { SERVER_URL } from "@/lib/env";
+import { persistAdminKey, resolveInitialAdminKey } from "@/lib/admin-key";
 import type {
   AdminToken,
   GenerateResponse,
@@ -40,11 +41,8 @@ import {
 import { GenerateWizardModal } from "./GenerateWizardModal";
 import { EditTokenModal } from "./EditTokenModal.tsx";
 
-const ADMIN_KEY_STORAGE = "x32_admin_key";
-const configuredAdminKey = String(import.meta.env.VITE_ADMIN_KEY ?? "").trim();
-
 export function AdminPage() {
-  const [adminKey, setAdminKey] = useState<string>(configuredAdminKey);
+  const [adminKey, setAdminKey] = useState<string>(resolveInitialAdminKey);
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [tokens, setTokens] = useState<AdminToken[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -64,16 +62,7 @@ export function AdminPage() {
   } | null>(null);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(ADMIN_KEY_STORAGE);
-    if (saved) {
-      setAdminKey(saved);
-    } else if (configuredAdminKey) {
-      setAdminKey(configuredAdminKey);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+    persistAdminKey(adminKey);
   }, [adminKey]);
 
   const apiRequest = useCallback(

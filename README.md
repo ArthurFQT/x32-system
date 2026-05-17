@@ -340,8 +340,9 @@ Passos:
 
 1. Importe o repositorio na Vercel.
 2. Defina `Root Directory = web`.
-3. Configure env:
+3. Configure env (mesmos valores do Render, onde aplicavel):
    - `VITE_SERVER_URL=https://SEU_BACKEND_RENDER`
+   - `VITE_ADMIN_KEY=` igual a `ADMIN_API_KEY` do backend no Render
 4. Deploy.
 
 Teste:
