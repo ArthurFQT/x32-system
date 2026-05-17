@@ -23,6 +23,8 @@ import {
   Button,
   ButtonSmall,
   AlertMessage,
+  FieldLabel,
+  TextInput,
   FlexRow,
   theme,
 } from "@/styles";
@@ -38,10 +40,11 @@ import {
 import { GenerateWizardModal } from "./GenerateWizardModal";
 import { EditTokenModal } from "./EditTokenModal.tsx";
 
+const ADMIN_KEY_STORAGE = "x32_admin_key";
 const configuredAdminKey = String(import.meta.env.VITE_ADMIN_KEY ?? "").trim();
 
 export function AdminPage() {
-  const [adminKey] = useState<string>(configuredAdminKey);
+  const [adminKey, setAdminKey] = useState<string>(configuredAdminKey);
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [tokens, setTokens] = useState<AdminToken[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -59,6 +62,19 @@ export function AdminPage() {
     tokenId: string;
     data: QrResponse;
   } | null>(null);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(ADMIN_KEY_STORAGE);
+    if (saved) {
+      setAdminKey(saved);
+    } else if (configuredAdminKey) {
+      setAdminKey(configuredAdminKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+  }, [adminKey]);
 
   const apiRequest = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -231,6 +247,17 @@ export function AdminPage() {
             </Button>
           </HeaderActions>
         </Header>
+
+        <div>
+          <FieldLabel htmlFor="admin-key">Chave admin</FieldLabel>
+          <TextInput
+            id="admin-key"
+            type="password"
+            value={adminKey}
+            onChange={(e) => setAdminKey(e.target.value)}
+            placeholder="x-admin-key"
+          />
+        </div>
 
         {error && <AlertMessage type="error">{error}</AlertMessage>}
 
