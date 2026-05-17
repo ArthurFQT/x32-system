@@ -16,6 +16,9 @@ export function setupBridgeHandlers(io: Server) {
       return next();
     }
 
+    console.log("AUTH BRIDGE SECRET:", auth.bridgeSecret);
+    console.log("ENV BRIDGE SECRET:", BRIDGE_SECRET);
+
     if (BRIDGE_SECRET && auth.bridgeSecret !== BRIDGE_SECRET) {
       logAction("SOCKET_AUTH_FAILED", {
         role: "bridge",
